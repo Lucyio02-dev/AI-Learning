@@ -212,6 +212,17 @@ button {
   transform: translateY(-1px);
 }
 
+.transfer-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  font-family: Arial, sans-serif;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
