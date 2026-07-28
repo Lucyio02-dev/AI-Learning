@@ -172,20 +172,26 @@ const modules = [
 
 const ebooks = [
   {
+    id: "repo-home",
     title: "《动手学大模型》GitHub 项目",
     type: "在线教程",
+    category: "项目",
     desc: "章节资料、课件、教程和脚本入口。",
     url: REPO
   },
   {
+    id: "repo-documents",
     title: "动手学大模型资料目录",
     type: "在线资料",
+    category: "资料",
     desc: "按章节查看项目中的 documents 内容。",
     url: `${REPO}/tree/main/documents`
   },
   {
+    id: "ascend-course",
     title: "大模型开发全流程在线课程",
     type: "课程",
+    category: "课程",
     desc: "华为昇腾开发者课程入口，可与网页端笔记配合使用。",
     url: COURSE
   }
@@ -220,6 +226,7 @@ function defaultState() {
     progress: Object.fromEntries(modules.map((item) => [item.id, { read: false, practice: false, video: false }])),
     notes: {},
     practiceLogs: {},
+    favorites: [],
     videos: []
   };
 }
@@ -238,6 +245,7 @@ function mergeState(base, saved) {
   merged.progress = { ...base.progress, ...(saved.progress || {}) };
   merged.notes = { ...(saved.notes || {}) };
   merged.practiceLogs = { ...(saved.practiceLogs || {}) };
+  merged.favorites = Array.isArray(saved.favorites) ? saved.favorites : [];
   merged.videos = Array.isArray(saved.videos) ? saved.videos : [];
   if (!modules.some((item) => item.id === merged.activeModule)) merged.activeModule = modules[0].id;
   return merged;
@@ -249,6 +257,7 @@ function saveState() {
   renderQuickGrid();
   renderWorkspaceLinks();
   renderStageRoadmap();
+  renderAchievements();
   renderGlobalSearch();
   renderNoteList();
 }
@@ -376,7 +385,7 @@ function renderWorkspaceLinks() {
   const items = [
     { icon: "▦", title: "学习路线", text: `${modules.length} 个模块`, view: "curriculum" },
     { icon: "⌘", title: "实践记录", text: `${practiceLogs} 条实验复盘`, view: "practice" },
-    { icon: "▤", title: "资料书库", text: `${ebooks.length} 个内置入口`, view: "library" },
+    { icon: "▤", title: "资料书库", text: `${getLibraryResources().length} 个资源入口`, view: "library" },
     { icon: "▶", title: "课程视频", text: `${defaultVideos.length + state.videos.length} 个视频入口`, view: "videos" },
     { icon: "✎", title: "学习笔记", text: `${noteCount} 篇已保存`, view: "notes" }
   ];
@@ -412,6 +421,52 @@ function renderStageRoadmap() {
     card.querySelector(".stage-pill").textContent = `${percent}%`;
     card.querySelector(".stage-progress span").style.width = `${percent}%`;
     card.querySelector("p").textContent = `${stageModules.length} 个模块，已完成 ${done} / ${checks} 个学习动作`;
+    target.append(card);
+  });
+}
+
+function getLibraryResources() {
+  const chapterResources = modules.map((item) => ({
+    id: `chapter-${item.id}`,
+    title: `${item.index}. ${item.title}`,
+    type: "章节教程",
+    category: item.stage,
+    tags: item.tags,
+    desc: item.summary,
+    url: item.tutorial
+  }));
+  return [...ebooks, ...chapterResources];
+}
+
+function renderAchievements() {
+  const target = $("#achievement-grid");
+  if (!target) return;
+  target.innerHTML = "";
+  const read = modules.filter((item) => state.progress[item.id]?.read).length;
+  const practice = modules.filter((item) => state.progress[item.id]?.practice).length;
+  const video = modules.filter((item) => state.progress[item.id]?.video).length;
+  const notes = Object.values(state.notes).filter((note) => note?.body?.trim()).length;
+  const favoriteCount = state.favorites.length;
+  const allDone = modules.every((item) => {
+    const progress = state.progress[item.id] || {};
+    return progress.read && progress.practice && progress.video;
+  });
+  const achievements = [
+    { icon: "01", title: "启航", desc: "完成任意一个阅读动作", unlocked: read >= 1 },
+    { icon: "XP", title: "动手派", desc: "完成 3 个实践模块", unlocked: practice >= 3 },
+    { icon: "KB", title: "知识整理者", desc: "保存 5 篇学习笔记", unlocked: notes >= 5 },
+    { icon: "★", title: "资料策展人", desc: "收藏 5 个学习资源", unlocked: favoriteCount >= 5 },
+    { icon: "▶", title: "课程跟学者", desc: "完成 3 个视频学习动作", unlocked: video >= 3 },
+    { icon: "AI", title: "大模型通关", desc: "完成所有阅读、实践和视频动作", unlocked: allDone }
+  ];
+
+  achievements.forEach((item) => {
+    const card = document.createElement("article");
+    card.className = `achievement-card ${item.unlocked ? "" : "locked"}`;
+    card.innerHTML = `<div class="achievement-badge"></div><div><h3></h3><p></p></div>`;
+    card.querySelector(".achievement-badge").textContent = item.unlocked ? item.icon : "–";
+    card.querySelector("h3").textContent = item.title;
+    card.querySelector("p").textContent = item.desc;
     target.append(card);
   });
 }
@@ -455,7 +510,7 @@ function renderGlobalSearch() {
       }
     }));
 
-  const resourceResults = [...ebooks, ...defaultVideos, ...state.videos]
+  const resourceResults = [...getLibraryResources(), ...defaultVideos, ...state.videos]
     .filter((item) => `${item.title} ${item.desc || ""} ${item.url || ""}`.toLowerCase().includes(keyword))
     .map((item) => ({
       label: item.type || "资源",
@@ -596,17 +651,88 @@ function renderPractice() {
 
 function renderLibrary() {
   const target = $("#ebook-list");
+  const stats = $("#library-stats");
   target.innerHTML = "";
-  ebooks.forEach((item) => {
+  const query = $("#resource-search")?.value.trim().toLowerCase() || "";
+  const type = $("#resource-type-filter")?.value || "all";
+  const favoriteOnly = Boolean($("#favorite-only")?.checked);
+  const resources = getLibraryResources();
+  const filtered = resources
+    .filter((item) => type === "all" || item.type === type)
+    .filter((item) => !favoriteOnly || state.favorites.includes(item.id))
+    .filter((item) => {
+      const haystack = `${item.title} ${item.type} ${item.category || ""} ${item.desc || ""} ${(item.tags || []).join(" ")}`.toLowerCase();
+      return !query || haystack.includes(query);
+    });
+
+  if (stats) {
+    const favoriteCount = state.favorites.length;
+    stats.innerHTML = "";
+    [
+      ["资源总数", resources.length],
+      ["已收藏", favoriteCount],
+      ["当前筛选", filtered.length]
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = "library-stat";
+      item.innerHTML = `<span></span><strong></strong>`;
+      item.querySelector("span").textContent = label;
+      item.querySelector("strong").textContent = value;
+      stats.append(item);
+    });
+  }
+
+  filtered.forEach((item) => {
     const row = document.createElement("article");
-    row.className = "resource-item";
-    row.innerHTML = `<span class="stage-pill"></span><strong></strong><p class="muted"></p><div class="resource-actions"></div>`;
-    row.querySelector(".stage-pill").textContent = item.type;
+    const isFavorite = state.favorites.includes(item.id);
+    row.className = `resource-item ${isFavorite ? "favorite" : ""}`;
+    row.innerHTML = `<div class="resource-meta"></div><strong></strong><p class="muted"></p><div class="resource-actions"></div>`;
+    const meta = row.querySelector(".resource-meta");
+    const typePill = document.createElement("span");
+    typePill.className = "stage-pill";
+    typePill.textContent = item.type;
+    meta.append(typePill);
+    if (item.category) {
+      const category = document.createElement("span");
+      category.className = "tag";
+      category.textContent = item.category;
+      meta.append(category);
+    }
+    (item.tags || []).slice(0, 2).forEach((tag) => {
+      const tagEl = document.createElement("span");
+      tagEl.className = "tag";
+      tagEl.textContent = tag;
+      meta.append(tagEl);
+    });
     row.querySelector("strong").textContent = item.title;
     row.querySelector("p").textContent = item.desc;
-    row.querySelector(".resource-actions").append(linkButton("打开", item.url));
+    const actions = row.querySelector(".resource-actions");
+    actions.append(linkButton("打开", item.url));
+    const favorite = document.createElement("button");
+    favorite.className = "secondary-button";
+    favorite.textContent = isFavorite ? "取消收藏" : "收藏";
+    favorite.addEventListener("click", () => toggleFavorite(item.id));
+    actions.append(favorite);
     target.append(row);
   });
+
+  if (!filtered.length) {
+    const empty = document.createElement("article");
+    empty.className = "resource-item";
+    empty.innerHTML = `<span class="stage-pill">资料库</span><strong>没有匹配资源</strong><p class="muted">调整关键词、类型或取消“只看收藏”。</p>`;
+    target.append(empty);
+  }
+}
+
+function toggleFavorite(id) {
+  if (state.favorites.includes(id)) {
+    state.favorites = state.favorites.filter((item) => item !== id);
+  } else {
+    state.favorites.push(id);
+  }
+  saveState();
+  renderLibrary();
+  renderAchievements();
 }
 
 function renderVideos() {
@@ -839,6 +965,9 @@ function bindEvents() {
   });
   $("#module-search").addEventListener("input", renderModules);
   $("#stage-filter").addEventListener("change", renderModules);
+  $("#resource-search")?.addEventListener("input", renderLibrary);
+  $("#resource-type-filter")?.addEventListener("change", renderLibrary);
+  $("#favorite-only")?.addEventListener("change", renderLibrary);
   $("#practice-module").addEventListener("change", () => {
     state.activeModule = $("#practice-module").value;
     renderPractice();
@@ -904,6 +1033,7 @@ function renderAll() {
   renderQuickGrid();
   renderWorkspaceLinks();
   renderStageRoadmap();
+  renderAchievements();
   renderGlobalSearch();
   renderModules();
   renderPractice();

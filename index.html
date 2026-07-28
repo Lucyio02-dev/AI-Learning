@@ -157,6 +157,16 @@
             </div>
             <div class="stage-roadmap" id="stage-roadmap"></div>
           </section>
+
+          <section class="section-band">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">成就徽章</p>
+                <h2>学习反馈</h2>
+              </div>
+            </div>
+            <div class="achievement-grid" id="achievement-grid"></div>
+          </section>
         </section>
 
         <section class="view" id="curriculum-view" aria-labelledby="view-title">
@@ -212,12 +222,27 @@
             <section class="tool-panel">
               <div class="section-head compact">
                 <div>
-                  <p class="eyebrow">电子书与资料</p>
-                  <h2>阅读书架</h2>
+                  <p class="eyebrow">知识中心</p>
+                  <h2>资料库</h2>
                 </div>
                 <label class="secondary-button file-button">
                   预览我的 PDF
                   <input id="ebook-file" type="file" accept="application/pdf" />
+                </label>
+              </div>
+              <div class="library-stats" id="library-stats"></div>
+              <div class="library-controls">
+                <input id="resource-search" type="search" placeholder="搜索资料、课程、章节..." />
+                <select id="resource-type-filter">
+                  <option value="all">全部类型</option>
+                  <option value="在线教程">在线教程</option>
+                  <option value="在线资料">在线资料</option>
+                  <option value="课程">课程</option>
+                  <option value="章节教程">章节教程</option>
+                </select>
+                <label class="toggle-pill">
+                  <input id="favorite-only" type="checkbox" />
+                  只看收藏
                 </label>
               </div>
               <div class="resource-list" id="ebook-list"></div>

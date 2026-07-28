@@ -530,6 +530,60 @@ button {
   line-height: 1.5;
 }
 
+.achievement-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.achievement-card {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 128px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: #ffffff;
+  box-shadow: var(--soft-shadow);
+}
+
+.achievement-card.locked {
+  background: #f8fafc;
+  color: #7a8796;
+}
+
+.achievement-badge {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  background: #eef6ff;
+  color: var(--blue);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.achievement-card.locked .achievement-badge {
+  background: #edf1f5;
+  color: #9aa6b2;
+}
+
+.achievement-card h3,
+.achievement-card p {
+  margin: 0;
+}
+
+.achievement-card h3 {
+  font-size: 16px;
+}
+
+.achievement-card p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .learning-map {
   position: relative;
   grid-column: 1;
@@ -797,7 +851,7 @@ textarea:focus {
 }
 
 .library-layout {
-  grid-template-columns: 390px minmax(0, 1fr);
+  grid-template-columns: minmax(420px, 0.95fr) minmax(0, 1fr);
 }
 
 .notes-layout {
@@ -857,6 +911,60 @@ textarea:focus {
   gap: 10px;
 }
 
+.library-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.library-stat {
+  display: grid;
+  gap: 6px;
+  min-height: 74px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfdff;
+}
+
+.library-stat span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.library-stat strong {
+  font-size: 20px;
+}
+
+.library-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px auto;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: var(--ink);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.toggle-pill input {
+  width: 16px;
+  height: 16px;
+}
+
 .resource-item,
 .note-item {
   display: grid;
@@ -865,6 +973,21 @@ textarea:focus {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-strong);
+}
+
+.resource-item.favorite {
+  border-color: #f0c75a;
+  background: #fffaf0;
+}
+
+.resource-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.resource-meta .tag {
+  background: #ffffff;
 }
 
 .resource-item strong,
@@ -1021,7 +1144,9 @@ textarea:focus {
 
   .filters,
   .add-form,
-  .command-bar {
+  .command-bar,
+  .library-controls,
+  .library-stats {
     grid-template-columns: 1fr;
   }
 
