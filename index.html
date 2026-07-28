@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111820" />
+    <title>AI大学习平台</title>
+    <link rel="manifest" href="./site.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">AI</div>
+          <div>
+            <strong>AI大学习平台</strong>
+            <span>动手学大模型实践</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-button active" data-view="dashboard" title="总览">
+            <span class="nav-icon" aria-hidden="true">⌂</span>
+            <span>总览</span>
+          </button>
+          <button class="nav-button" data-view="curriculum" title="学习路线">
+            <span class="nav-icon" aria-hidden="true">▦</span>
+            <span>路线</span>
+          </button>
+          <button class="nav-button" data-view="practice" title="实践实验">
+            <span class="nav-icon" aria-hidden="true">⌘</span>
+            <span>实践</span>
+          </button>
+          <button class="nav-button" data-view="library" title="电子书">
+            <span class="nav-icon" aria-hidden="true">▤</span>
+            <span>书库</span>
+          </button>
+          <button class="nav-button" data-view="videos" title="课程视频">
+            <span class="nav-icon" aria-hidden="true">▶</span>
+            <span>视频</span>
+          </button>
+          <button class="nav-button" data-view="notes" title="学习笔记">
+            <span class="nav-icon" aria-hidden="true">✎</span>
+            <span>笔记</span>
+          </button>
+        </nav>
+
+        <div class="source-box">
+          <span>资料来源</span>
+          <a href="https://github.com/Lordog/dive-into-llms" target="_blank" rel="noreferrer">Lordog/dive-into-llms</a>
+          <a href="https://hiascend.com/developer/courses/detail/1578542990315864066" target="_blank" rel="noreferrer">大模型开发全流程课程</a>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">网页学习工作台</p>
+            <h1 id="view-title">总览</h1>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-button" id="export-data" title="导出学习数据">
+              <span aria-hidden="true">⇩</span>
+              <span class="sr-only">导出学习数据</span>
+            </button>
+            <label class="icon-button file-button" title="导入学习数据">
+              <span aria-hidden="true">⇧</span>
+              <span class="sr-only">导入学习数据</span>
+              <input id="import-data" type="file" accept="application/json" />
+            </label>
+          </div>
+        </header>
+
+        <section class="view active" id="dashboard-view" aria-labelledby="view-title">
+          <div class="dashboard-grid">
+            <section class="learning-map" aria-label="学习地图">
+              <canvas id="map-canvas" width="920" height="420"></canvas>
+              <div class="map-overlay">
+                <p>LLM 学习路径</p>
+                <strong>从基础实践到智能体与安全对齐</strong>
+              </div>
+            </section>
+
+            <section class="stats-panel tool-panel" aria-label="学习统计">
+              <div class="stat">
+                <span id="stat-progress">0%</span>
+                <p>整体完成度</p>
+              </div>
+              <div class="stat-line">
+                <span>已完成阅读</span>
+                <strong id="stat-read">0 / 11</strong>
+              </div>
+              <div class="stat-line">
+                <span>已完成实践</span>
+                <strong id="stat-practice">0 / 11</strong>
+              </div>
+              <div class="stat-line">
+                <span>已记录笔记</span>
+                <strong id="stat-notes">0</strong>
+              </div>
+            </section>
+          </div>
+
+          <section class="section-band">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">建议下一步</p>
+                <h2 id="next-title">选择一个模块开始</h2>
+              </div>
+              <button class="primary-button" id="continue-learning">继续学习</button>
+            </div>
+            <div class="quick-grid" id="quick-grid"></div>
+          </section>
+        </section>
+
+        <section class="view" id="curriculum-view" aria-labelledby="view-title">
+          <div class="filters tool-panel">
+            <label>
+              <span>搜索</span>
+              <input id="module-search" type="search" placeholder="模型、微调、RAG、安全..." />
+            </label>
+            <label>
+              <span>阶段</span>
+              <select id="stage-filter">
+                <option value="all">全部阶段</option>
+                <option value="基础">基础</option>
+                <option value="进阶">进阶</option>
+                <option value="应用">应用</option>
+                <option value="安全">安全</option>
+              </select>
+            </label>
+          </div>
+          <div class="module-grid" id="module-grid"></div>
+        </section>
+
+        <section class="view" id="practice-view" aria-labelledby="view-title">
+          <div class="practice-layout">
+            <section class="tool-panel">
+              <div class="section-head compact">
+                <div>
+                  <p class="eyebrow">实验模块</p>
+                  <h2 id="practice-module-title">实践实验</h2>
+                </div>
+                <select id="practice-module"></select>
+              </div>
+              <p class="muted" id="practice-summary"></p>
+              <div class="task-list" id="task-list"></div>
+            </section>
+
+            <section class="tool-panel">
+              <div class="section-head compact">
+                <div>
+                  <p class="eyebrow">实验记录</p>
+                  <h2>结果与复盘</h2>
+                </div>
+                <button class="secondary-button" id="mark-practice">标记完成</button>
+              </div>
+              <textarea id="practice-log" rows="12" placeholder="记录环境、参数、输出、问题和改进方向..."></textarea>
+              <button class="primary-button full-width" id="save-practice-log">保存实践记录</button>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="library-view" aria-labelledby="view-title">
+          <div class="library-layout">
+            <section class="tool-panel">
+              <div class="section-head compact">
+                <div>
+                  <p class="eyebrow">电子书与资料</p>
+                  <h2>阅读书架</h2>
+                </div>
+                <label class="secondary-button file-button">
+                  预览我的 PDF
+                  <input id="ebook-file" type="file" accept="application/pdf" />
+                </label>
+              </div>
+              <div class="resource-list" id="ebook-list"></div>
+            </section>
+
+            <section class="reader-panel tool-panel">
+              <div class="reader-empty" id="reader-empty">
+                <strong>选择资料开始阅读</strong>
+                <p>在线资料会在新标签打开；你选择的 PDF 只在当前浏览器预览，不会上传或共享。</p>
+              </div>
+              <iframe id="pdf-reader" title="PDF 阅读器"></iframe>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="videos-view" aria-labelledby="view-title">
+          <div class="video-layout">
+            <section class="tool-panel">
+              <div class="section-head compact">
+                <div>
+                  <p class="eyebrow">课程视频</p>
+                  <h2>视频清单</h2>
+                </div>
+                <label class="secondary-button file-button">
+                  播放我的视频
+                  <input id="video-file" type="file" accept="video/*" />
+                </label>
+              </div>
+
+              <form class="add-form" id="video-form">
+                <input id="video-title-input" type="text" placeholder="视频标题" />
+                <input id="video-url-input" type="url" placeholder="https://..." />
+                <button class="primary-button" type="submit">添加链接</button>
+              </form>
+              <div class="resource-list" id="video-list"></div>
+            </section>
+
+            <section class="tool-panel video-player-panel">
+              <video id="video-player" controls></video>
+              <div class="reader-empty" id="video-empty">
+                <strong>选择一个视频</strong>
+                <p>外部课程链接会在新标签打开；你选择的视频只在当前浏览器播放，不会上传或共享。</p>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="notes-view" aria-labelledby="view-title">
+          <div class="notes-layout">
+            <aside class="note-index tool-panel" aria-label="笔记目录">
+              <select id="note-module"></select>
+              <div class="note-list" id="note-list"></div>
+            </aside>
+            <section class="note-editor tool-panel">
+              <input id="note-title" type="text" placeholder="笔记标题" />
+              <input id="note-tags" type="text" placeholder="标签，用逗号分隔" />
+              <textarea id="note-body" rows="18" placeholder="写下概念、公式、代码、实验结论和下一步问题..."></textarea>
+              <div class="editor-actions">
+                <button class="secondary-button" id="download-note">导出 Markdown</button>
+                <button class="primary-button" id="save-note">保存笔记</button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="module-card-template">
+      <article class="module-card">
+        <div class="card-head">
+          <span class="stage-pill"></span>
+          <span class="module-index"></span>
+        </div>
+        <h3></h3>
+        <p></p>
+        <div class="tag-row"></div>
+        <div class="progress-checks">
+          <label><input type="checkbox" data-field="read" /> 阅读</label>
+          <label><input type="checkbox" data-field="practice" /> 实践</label>
+          <label><input type="checkbox" data-field="video" /> 视频</label>
+        </div>
+        <div class="card-actions"></div>
+      </article>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "AI大学习平台",
+  "short_name": "AI大学习",
+  "description": "面向大模型学习、实践、阅读、视频和笔记的网页学习平台。",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f7f8fb",
+  "theme_color": "#111820",
+  "lang": "zh-CN",
+  "icons": []
+}
