@@ -73,44 +73,89 @@
         </header>
 
         <section class="view active" id="dashboard-view" aria-labelledby="view-title">
-          <div class="dashboard-grid">
+          <div class="command-bar tool-panel" role="search">
+            <span aria-hidden="true">⌕</span>
+            <input id="global-search" type="search" placeholder="搜索章节、标签、笔记和资料..." />
+            <button class="secondary-button" id="clear-global-search">清空</button>
+          </div>
+          <div class="search-results" id="search-results"></div>
+
+          <div class="dashboard-layout">
+            <section class="hero-panel" aria-label="学习驾驶舱">
+              <div class="hero-content">
+                <p class="eyebrow">AI大学习平台</p>
+                <h2>你的大模型学习驾驶舱</h2>
+                <p>把课程、实践、资料和笔记集中到一个网页工作台，按阶段推进，从动手实验积累自己的 AI 能力栈。</p>
+                <div class="hero-actions">
+                  <button class="primary-button" id="continue-learning">继续学习</button>
+                  <button class="secondary-button" data-jump-view="notes">写笔记</button>
+                </div>
+              </div>
+              <div class="progress-orbit" aria-label="整体完成度">
+                <div class="progress-ring" id="dashboard-progress-ring">
+                  <span id="stat-progress">0%</span>
+                </div>
+                <p>整体完成度</p>
+              </div>
+            </section>
+
+            <section class="tool-panel cockpit-panel" aria-label="学习统计">
+              <div class="metric-card">
+                <span>阅读</span>
+                <strong id="stat-read">0 / 11</strong>
+              </div>
+              <div class="metric-card">
+                <span>实践</span>
+                <strong id="stat-practice">0 / 11</strong>
+              </div>
+              <div class="metric-card">
+                <span>笔记</span>
+                <strong id="stat-notes">0</strong>
+              </div>
+              <div class="metric-card">
+                <span>阶段</span>
+                <strong id="stat-stage">基础</strong>
+              </div>
+            </section>
+
             <section class="learning-map" aria-label="学习地图">
               <canvas id="map-canvas" width="920" height="420"></canvas>
               <div class="map-overlay">
                 <p>LLM 学习路径</p>
-                <strong>从基础实践到智能体与安全对齐</strong>
+                <strong>基础、推理、多模态、智能体、安全对齐</strong>
               </div>
             </section>
 
-            <section class="stats-panel tool-panel" aria-label="学习统计">
-              <div class="stat">
-                <span id="stat-progress">0%</span>
-                <p>整体完成度</p>
+            <aside class="workspace-panel tool-panel" aria-label="知识工作台">
+              <div class="section-head compact">
+                <div>
+                  <p class="eyebrow">知识工作台</p>
+                  <h2>常用入口</h2>
+                </div>
               </div>
-              <div class="stat-line">
-                <span>已完成阅读</span>
-                <strong id="stat-read">0 / 11</strong>
-              </div>
-              <div class="stat-line">
-                <span>已完成实践</span>
-                <strong id="stat-practice">0 / 11</strong>
-              </div>
-              <div class="stat-line">
-                <span>已记录笔记</span>
-                <strong id="stat-notes">0</strong>
-              </div>
-            </section>
+              <div class="workspace-links" id="workspace-links"></div>
+            </aside>
           </div>
 
           <section class="section-band">
             <div class="section-head">
               <div>
-                <p class="eyebrow">建议下一步</p>
+                <p class="eyebrow">今日建议</p>
                 <h2 id="next-title">选择一个模块开始</h2>
               </div>
-              <button class="primary-button" id="continue-learning">继续学习</button>
             </div>
             <div class="quick-grid" id="quick-grid"></div>
+          </section>
+
+          <section class="section-band">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">学习路线</p>
+                <h2>阶段进度</h2>
+              </div>
+              <button class="secondary-button" data-jump-view="curriculum">查看全部</button>
+            </div>
+            <div class="stage-roadmap" id="stage-roadmap"></div>
           </section>
         </section>
 

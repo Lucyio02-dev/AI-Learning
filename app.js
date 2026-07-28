@@ -247,6 +247,9 @@ function saveState() {
   localStorage.setItem(STORE_KEY, JSON.stringify(state));
   renderStats();
   renderQuickGrid();
+  renderWorkspaceLinks();
+  renderStageRoadmap();
+  renderGlobalSearch();
   renderNoteList();
 }
 
@@ -279,27 +282,26 @@ function renderStats() {
   const read = modules.filter((item) => state.progress[item.id]?.read).length;
   const practice = modules.filter((item) => state.progress[item.id]?.practice).length;
   const notes = Object.values(state.notes).filter((note) => note?.body?.trim()).length;
-  $("#stat-progress").textContent = `${Math.round((finishedChecks / totalChecks) * 100)}%`;
+  const percent = Math.round((finishedChecks / totalChecks) * 100);
+  $("#stat-progress").textContent = `${percent}%`;
+  $("#dashboard-progress-ring")?.style.setProperty("--progress", `${percent}%`);
   $("#stat-read").textContent = `${read} / ${modules.length}`;
   $("#stat-practice").textContent = `${practice} / ${modules.length}`;
   $("#stat-notes").textContent = String(notes);
 
   const next = modules.find((item) => !state.progress[item.id]?.practice) || modules[0];
   $("#next-title").textContent = `${next.index}. ${next.title}`;
+  $("#stat-stage").textContent = next.stage;
 }
 
 function renderQuickGrid() {
   const target = $("#quick-grid");
   target.innerHTML = "";
   const next = modules.find((item) => !state.progress[item.id]?.practice) || moduleById(state.activeModule);
-  const recentNotes = Object.entries(state.notes)
-    .filter(([, note]) => note?.body?.trim())
-    .slice(-2)
-    .map(([id, note]) => ({ ...note, module: moduleById(id) }));
-
   const cards = [
     {
-      title: "继续实践",
+      label: "Next",
+      title: "继续当前模块",
       text: `${next.title}: ${next.summary}`,
       action: "打开实践",
       onClick: () => {
@@ -310,14 +312,23 @@ function renderQuickGrid() {
       }
     },
     {
-      title: "整理笔记",
-      text: recentNotes[0] ? `${recentNotes[0].module.title}: ${recentNotes[0].title || "未命名笔记"}` : "还没有笔记，先为当前模块记录关键概念和实验结果。",
+      label: "Focus",
+      title: "今日任务",
+      text: buildTodayTask(next),
+      action: "查看路线",
+      onClick: () => setView("curriculum")
+    },
+    {
+      label: "Review",
+      title: "整理知识库",
+      text: latestNoteSummary(),
       action: "打开笔记",
       onClick: () => setView("notes")
     },
     {
-      title: "课程资料",
-      text: "查看项目教程、配套资料和你设备上的 PDF。",
+      label: "Library",
+      title: "资料工作台",
+      text: "进入资料、课程视频和本机 PDF 预览入口，把学习材料集中处理。",
       action: "打开书库",
       onClick: () => setView("library")
     }
@@ -326,7 +337,8 @@ function renderQuickGrid() {
   cards.forEach((card) => {
     const el = document.createElement("article");
     el.className = "module-card";
-    el.innerHTML = `<div class="card-head"><span class="stage-pill">快捷入口</span></div><h3></h3><p></p><div class="card-actions"></div>`;
+    el.innerHTML = `<div class="card-head"><span class="stage-pill"></span></div><h3></h3><p></p><div class="card-actions"></div>`;
+    el.querySelector(".stage-pill").textContent = card.label;
     el.querySelector("h3").textContent = card.title;
     el.querySelector("p").textContent = card.text;
     const button = document.createElement("button");
@@ -336,6 +348,144 @@ function renderQuickGrid() {
     el.querySelector(".card-actions").append(button);
     target.append(el);
   });
+}
+
+function buildTodayTask(item) {
+  const progress = state.progress[item.id] || {};
+  if (!progress.read) return `先完成 ${item.title} 的教程阅读，再记录 3 个关键词。`;
+  if (!progress.practice) return `完成 ${item.title} 的实践任务，并把参数、输出和问题写入实验记录。`;
+  if (!progress.video) return `补看 ${item.title} 相关课程或资料视频，记录一个可复用结论。`;
+  return "选择下一个还没完成的模块，保持阅读、实践、笔记同步推进。";
+}
+
+function latestNoteSummary() {
+  const notes = Object.entries(state.notes)
+    .filter(([, note]) => note?.body?.trim())
+    .slice(-1)
+    .map(([id, note]) => ({ ...note, module: moduleById(id) }));
+  if (!notes.length) return "还没有沉淀笔记，先把当前模块的概念、代码和实验结论写下来。";
+  return `${notes[0].module.title}: ${notes[0].title || "未命名笔记"}，更新于 ${notes[0].updated || "最近"}`;
+}
+
+function renderWorkspaceLinks() {
+  const target = $("#workspace-links");
+  if (!target) return;
+  target.innerHTML = "";
+  const practiceLogs = Object.values(state.practiceLogs).filter((log) => log?.trim()).length;
+  const noteCount = Object.values(state.notes).filter((note) => note?.body?.trim()).length;
+  const items = [
+    { icon: "▦", title: "学习路线", text: `${modules.length} 个模块`, view: "curriculum" },
+    { icon: "⌘", title: "实践记录", text: `${practiceLogs} 条实验复盘`, view: "practice" },
+    { icon: "▤", title: "资料书库", text: `${ebooks.length} 个内置入口`, view: "library" },
+    { icon: "▶", title: "课程视频", text: `${defaultVideos.length + state.videos.length} 个视频入口`, view: "videos" },
+    { icon: "✎", title: "学习笔记", text: `${noteCount} 篇已保存`, view: "notes" }
+  ];
+
+  items.forEach((item) => {
+    const button = document.createElement("button");
+    button.className = "workspace-link";
+    button.innerHTML = `<span class="workspace-icon" aria-hidden="true"></span><span><strong></strong><span></span></span><em>→</em>`;
+    button.querySelector(".workspace-icon").textContent = item.icon;
+    button.querySelector("strong").textContent = item.title;
+    button.querySelector("span span").textContent = item.text;
+    button.addEventListener("click", () => setView(item.view));
+    target.append(button);
+  });
+}
+
+function renderStageRoadmap() {
+  const target = $("#stage-roadmap");
+  if (!target) return;
+  target.innerHTML = "";
+  ["基础", "进阶", "应用", "安全"].forEach((stage) => {
+    const stageModules = modules.filter((item) => item.stage === stage);
+    const checks = stageModules.length * 3;
+    const done = stageModules.reduce((sum, item) => {
+      const progress = state.progress[item.id] || {};
+      return sum + Number(progress.read) + Number(progress.practice) + Number(progress.video);
+    }, 0);
+    const percent = checks ? Math.round((done / checks) * 100) : 0;
+    const card = document.createElement("article");
+    card.className = "stage-card";
+    card.innerHTML = `<header><h3></h3><span class="stage-pill"></span></header><div class="stage-progress"><span></span></div><p></p>`;
+    card.querySelector("h3").textContent = stage;
+    card.querySelector(".stage-pill").textContent = `${percent}%`;
+    card.querySelector(".stage-progress span").style.width = `${percent}%`;
+    card.querySelector("p").textContent = `${stageModules.length} 个模块，已完成 ${done} / ${checks} 个学习动作`;
+    target.append(card);
+  });
+}
+
+function renderGlobalSearch() {
+  const input = $("#global-search");
+  const target = $("#search-results");
+  if (!input || !target) return;
+  const keyword = input.value.trim().toLowerCase();
+  target.innerHTML = "";
+  target.classList.toggle("active", Boolean(keyword));
+  if (!keyword) return;
+
+  const moduleResults = modules
+    .filter((item) => `${item.title} ${item.summary} ${item.tags.join(" ")}`.toLowerCase().includes(keyword))
+    .map((item) => ({
+      label: "章节",
+      title: item.title,
+      text: item.summary,
+      action: "打开实践",
+      onClick: () => {
+        state.activeModule = item.id;
+        $("#practice-module").value = item.id;
+        renderPractice();
+        saveState();
+        setView("practice");
+      }
+    }));
+
+  const noteResults = Object.entries(state.notes)
+    .filter(([, note]) => `${note.title || ""} ${note.tags || ""} ${note.body || ""}`.toLowerCase().includes(keyword))
+    .map(([id, note]) => ({
+      label: "笔记",
+      title: note.title || `${moduleById(id).title} 学习笔记`,
+      text: `${moduleById(id).title} · ${note.tags || "未设置标签"}`,
+      action: "打开笔记",
+      onClick: () => {
+        $("#note-module").value = id;
+        renderNoteEditor();
+        setView("notes");
+      }
+    }));
+
+  const resourceResults = [...ebooks, ...defaultVideos, ...state.videos]
+    .filter((item) => `${item.title} ${item.desc || ""} ${item.url || ""}`.toLowerCase().includes(keyword))
+    .map((item) => ({
+      label: item.type || "资源",
+      title: item.title,
+      text: item.desc || item.url,
+      action: "打开链接",
+      onClick: () => window.open(item.url, "_blank", "noreferrer")
+    }));
+
+  [...moduleResults, ...noteResults, ...resourceResults].slice(0, 8).forEach((item) => {
+    const result = document.createElement("article");
+    result.className = "search-result";
+    result.innerHTML = `<span class="stage-pill"></span><strong></strong><p class="muted"></p>`;
+    result.querySelector(".stage-pill").textContent = item.label;
+    result.querySelector("strong").textContent = item.title;
+    result.querySelector("p").textContent = item.text;
+    const button = document.createElement("button");
+    button.className = "secondary-button";
+    button.textContent = item.action;
+    button.addEventListener("click", item.onClick);
+    result.append(button);
+    target.append(result);
+  });
+
+  if (!target.children.length) {
+    const empty = document.createElement("article");
+    empty.className = "search-result";
+    empty.innerHTML = `<span class="stage-pill">搜索</span><strong>没有匹配结果</strong><p class="muted">换一个关键词试试，例如“微调”“安全”“笔记”。</p>`;
+    target.append(empty);
+  }
 }
 
 function renderModules() {
@@ -681,6 +831,12 @@ function drawMap() {
 
 function bindEvents() {
   $$(".nav-button").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
+  $$("[data-jump-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.jumpView)));
+  $("#global-search")?.addEventListener("input", renderGlobalSearch);
+  $("#clear-global-search")?.addEventListener("click", () => {
+    $("#global-search").value = "";
+    renderGlobalSearch();
+  });
   $("#module-search").addEventListener("input", renderModules);
   $("#stage-filter").addEventListener("change", renderModules);
   $("#practice-module").addEventListener("change", () => {
@@ -746,6 +902,9 @@ function bindEvents() {
 function renderAll() {
   renderStats();
   renderQuickGrid();
+  renderWorkspaceLinks();
+  renderStageRoadmap();
+  renderGlobalSearch();
   renderModules();
   renderPractice();
   renderLibrary();
