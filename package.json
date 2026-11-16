@@ -1,12 +1,15 @@
 {
   "name": "ai-learning-lab",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node scripts/serve.mjs",
-    "test": "node --test",
-    "check": "node --check app.js && node --check src/content.js && node --check src/store.js && node --check src/labs.js"
+    "dev": "node server/index.js",
+    "server": "node server/index.js",
+    "static": "node scripts/serve.mjs",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "check": "node check-frontend.mjs && node --check app.js && node --check server/index.js && node --check server/src/util.js && node --check server/src/llm.js && node --check server/src/tasks.js && node --check server/src/accounts.js && node --check server/src/rag.js",
+    "pycheck": "python -m py_compile experiments/inference.py experiments/rag_embed.py experiments/basics/train_eval.py experiments/embodied/sim.py experiments/embodied/collect.py experiments/embodied/bc_train.py experiments/embodied/evaluate.py"
   },
   "engines": {
     "node": ">=20"

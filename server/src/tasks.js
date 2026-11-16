@@ -21,7 +21,8 @@ export const WHITELIST = {
 };
 
 const MAX_CONCURRENT = Number(process.env.AI_LEARNING_MAX_TASKS || 1);
-const registry = new Map(); // taskId -> {proc, ...}
+const registry = new Map(); // taskId -> {proc}
+const memMeta = new Map(); // taskId -> 内存中的 meta 对象（cancel 与 close 共享同一份）
 
 export async function ensureDirs() {
   await mkdir(TASKS_DIR, { recursive: true });
@@ -59,9 +60,10 @@ export function publicView(meta) {
 }
 
 async function loadMeta(taskId) {
-  return ensureJson(join(TASKS_DIR, taskId, "meta.json"), null);
+  return memMeta.get(taskId) || ensureJson(join(TASKS_DIR, taskId, "meta.json"), null);
 }
 async function saveMeta(taskId, meta) {
+  memMeta.set(taskId, meta);
   await writeJson(join(TASKS_DIR, taskId, "meta.json"), meta);
 }
 
@@ -80,6 +82,8 @@ function pump() {
 }
 
 async function startProcess({ taskId, script, args, meta }) {
+  // 竞态保护：任务在入队到启动之间被取消，则不执行。
+  if (meta.status === "cancelled") return;
   const dir = join(TASKS_DIR, taskId);
   const metaPath = join(dir, "meta.json");
   const logPath = join(dir, "run.log");
@@ -91,6 +95,11 @@ async function startProcess({ taskId, script, args, meta }) {
   meta.status = "running";
   meta.startedAt = nowIso();
   await saveMeta(taskId, meta);
+  if (meta.status === "cancelled") {
+    // 启动期间被取消：终止子进程，不继续。
+    kill(taskId);
+    return;
+  }
   let logSize = 0;
   const append = async (buf) => {
     logSize += buf.length;
@@ -171,7 +180,8 @@ function kill(taskId) {
 }
 
 export async function cancelTask(taskId) {
-  const meta = await loadMeta(taskId);
+  // 与 close 回调共享同一 meta 对象，保证取消状态不被覆盖。
+  const meta = memMeta.get(taskId) || (await loadMeta(taskId));
   if (!meta) {
     const error = new Error("任务不存在");
     error.code = "E_TASK_UNKNOWN";

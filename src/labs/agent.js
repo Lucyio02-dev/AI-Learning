@@ -165,6 +165,7 @@ export const newAgentRun = (goal = "预约周五下午的实验室， capacities
   goal,
   phase: "idle", // idle|acting|interrupted|recovering|done
   requestId: "",
+  writtenRequestIds: [], // 本 run 发起过写入的全部幂等键（目标核验范围）
   world: newWorld(),
   trace: [], // {t, kind, tool, params, maskedParams, result|error, note}
   writes: 0,
@@ -226,6 +227,8 @@ export function callWrite(run, tool, params, fault = null) {
   }
   if (!params.request_id && tool === "book_lab")
     params.request_id = run.requestId || (run.requestId = now());
+  if (tool === "book_lab" && !run.writtenRequestIds.includes(params.request_id))
+    run.writtenRequestIds.push(params.request_id);
   const res = serverCall(run.world, tool, params, fault);
   run.writes++;
   if (fault === "timeout_write") {
@@ -273,9 +276,11 @@ export function recover(run) {
   return run;
 }
 
-// 目标核验：不只看状态码，看事实（恰好一条有效预约）。
+// 目标核验：不只看状态码，看事实（本 run 写入的幂等键恰好对应一条有效预约）。
 export function finish(run) {
-  const valid = run.world.bookings.filter((b) => b.requestId === run.requestId);
+  const valid = run.world.bookings.filter((b) =>
+    run.writtenRequestIds.includes(b.requestId),
+  );
   run.done = true;
   run.passed = valid.length === 1 && run.failure !== ERR.PERMISSION_DENIED;
   run.failure = run.passed ? "" : valid.length > 1 ? "重复预约" : run.failure || "目标未达成";

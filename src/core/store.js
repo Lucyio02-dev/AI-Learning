@@ -172,6 +172,20 @@ export function applyImport(parsed, mode, current = fresh()) {
   return { next, backup };
 }
 
+// 便捷入口：接受备份文本（{state} 包装或裸状态），返回 v3 状态。
+export function parseImport(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (error) {
+    throw new AppError("E_IMPORT_PARSE", error.message);
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    throw new AppError("E_IMPORT_NOT_OBJECT");
+  const raw = data.state && typeof data.state === "object" ? data.state : data;
+  return normalize(raw);
+}
+
 // 数据校验：字段类型、URL 协议、日期与原型污染键都拒绝或剔除。
 export function validateState(state) {
   const issues = [];

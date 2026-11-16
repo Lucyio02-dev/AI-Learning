@@ -1,0 +1,238 @@
+// 设置页：账户与同步、备份/导入（预检+冲突展示）、存储容量与归档、退出数据处理。
+import * as S from "../state.js";
+import { esc, button, details, table, pill, sectionHead, loading, errorBox, fmtTime } from "../ui.js";
+import { hasBackend, register, login, logout, clearToken, hasToken, syncPull, syncPush } from "../api.js";
+import { go } from "../router.js";
+
+let importPlan = null;
+
+export function render() {
+  const s = S.getState();
+  const sync = s.sync || {};
+  return `${sectionHead("SETTINGS", "数据、账户与同步。", "本机数据归你所有；同步是可选的，本地模式下全部核心功能可用。")}
+<div class="lower-grid">
+  <section class="panel">
+    <h2>账户（本地后端）</h2>
+    ${hasBackend()
+      ? hasToken()
+        ? `<p>已登录：<strong>${esc(sync.account?.username || "本地账户")}</strong>（数据按用户隔离存储在本地后端）</p>
+           <div class="stack">
+             <button class="secondary" data-action="sync-pull">从服务器拉取</button>
+             <button class="primary" data-action="sync-push">推送到服务器</button>
+             <button class="secondary" data-action="account-logout">退出登录</button>
+           </div>
+           ${details("退出登录后本机数据怎么办？", "<p>退出只清除登录令牌。本机浏览器数据保留；如需清除，请使用下方“清除本机数据”。服务端数据保留在你的账户里，下次登录可恢复。</p>")}`
+        : `<div class="control-pair">
+             <div><label for="reg-user">用户名（注册）</label><input id="reg-user" placeholder="3-32 位字母数字"></div>
+             <div><label for="reg-pass">密码（至少 8 位）</label><input id="reg-pass" type="password"></div>
+           </div>
+           <div class="control-pair">
+             <div><label for="login-user">用户名（登录）</label><input id="login-user"></div>
+             <div><label for="login-pass">密码</label><input id="login-pass" type="password"></div>
+           </div>
+           <div class="stack">
+             <button class="primary" data-action="account-register">注册并登录</button>
+             <button class="secondary" data-action="account-login">登录</button>
+           </div>
+           <p class="caption">同一账户在第二台设备/浏览器登录即可验证隔离与同步。密码经 scrypt 加盐哈希后存于本地后端。</p>`
+      : `<p class="muted">需要本地后端（npm run server）。本地模式不影响核心学习功能。</p>`}
+    <div id="sync-status" aria-live="polite"></div>
+  </section>
+  <section class="panel">
+    <h2>备份与迁移</h2>
+    <p class="muted">最近备份：${s.backedUp ? fmtTime(s.backedUp) : "尚未导出"}</p>
+    <div class="stack">
+      <button class="primary" data-action="backup">导出完整备份（JSON）</button>
+      <label class="secondary file-label">导入备份（先预检）<input id="import" type="file" accept=".json,application/json"></label>
+      <button class="secondary" data-action="archive-export">导出归档记录</button>
+    </div>
+    <div id="import-preview"></div>
+    <p class="caption">导入前会生成可恢复的服务端/本机双备份（不依赖浏览器下载）；预检显示范围与冲突，替换或合并由你选择。</p>
+  </section>
+</div>
+<div class="lower-grid">
+  <section class="panel">
+    <h2>存储与容量</h2>
+    ${table(["项", "数量", "说明"], [
+      ["活跃实验记录", String(s.runs.length), "上限 100 条"],
+      ["归档记录", String(s.archive.length), "超出上限自动归档，不丢弃"],
+      ["笔记", String(Object.keys(s.notes).length), "每篇保留最近 10 个版本"],
+      ["评价作答", String(s.quizAttempts.length), "保留全部，用于对比成长"],
+      ["v1 原始数据", s.legacy ? "有" : "无", "完整保留在 legacy 字段"],
+    ])}
+    <div class="stack">
+      <button class="secondary" data-action="archive-clear" ${s.archive.length ? "" : "disabled"}>清空归档（先导出）</button>
+      <button class="secondary" data-action="wipe-local">清除本机数据（危险）</button>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>界面偏好</h2>
+    <label class="check-row"><input id="reduced-motion" type="checkbox" ${s.settings?.reducedMotion ? "checked" : ""}>减少动态效果</label>
+    <p class="caption">遵循系统“减少动态效果”设置的同时，可在此强制关闭。</p>
+  </section>
+</div>`;
+}
+
+export function bind(root) {
+  // 账户
+  root.querySelector('[data-action="account-register"]')?.addEventListener("click", async () => {
+    const status = root.querySelector("#sync-status");
+    try {
+      status.innerHTML = loading("注册中…");
+      const data = await register(root.querySelector("#reg-user").value.trim(), root.querySelector("#reg-pass").value);
+      S.setSyncAccount(data.user, true);
+      status.innerHTML = `<span class="pill success">注册成功</span> 已登录 ${esc(data.user.username)}，可推送数据`;
+      rerender();
+    } catch (error) {
+      status.innerHTML = errorBox(error.message, error.code);
+    }
+  });
+  root.querySelector('[data-action="account-login"]')?.addEventListener("click", async () => {
+    const status = root.querySelector("#sync-status");
+    try {
+      status.innerHTML = loading("登录中…");
+      const data = await login(root.querySelector("#login-user").value.trim(), root.querySelector("#login-pass").value);
+      S.setSyncAccount(data.user, true);
+      status.innerHTML = `<span class="pill success">登录成功</span> ${esc(data.user.username)}`;
+      rerender();
+    } catch (error) {
+      status.innerHTML = errorBox(error.message, error.code);
+    }
+  });
+  root.querySelector('[data-action="account-logout"]')?.addEventListener("click", async () => {
+    await logout().catch(() => clearToken());
+    S.setSyncAccount(null, false);
+    rerender();
+  });
+  root.querySelector('[data-action="sync-pull"]')?.addEventListener("click", async () => {
+    const status = root.querySelector("#sync-status");
+    try {
+      status.innerHTML = loading("拉取中…");
+      const remote = await syncPull();
+      if (!remote.state) {
+        status.innerHTML = '<p class="muted">服务器上还没有数据，先“推送到服务器”。</p>';
+        return;
+      }
+      S.applyRemote(remote.state, remote.revision, S.getState().sync?.account);
+      status.innerHTML = `<span class="pill success">已拉取</span> 服务器版本 r${remote.revision}`;
+      rerender();
+    } catch (error) {
+      status.innerHTML = errorBox(error.message, error.code);
+    }
+  });
+  root.querySelector('[data-action="sync-push"]')?.addEventListener("click", async () => {
+    const status = root.querySelector("#sync-status");
+    try {
+      status.innerHTML = loading("推送中…");
+      const result = await syncPush(S.getState(), S.getState().sync?.revision ?? 0, "reject");
+      S.markSynced(result.revision);
+      status.innerHTML = `<span class="pill success">已推送</span> 服务器版本 r${result.revision}`;
+    } catch (error) {
+      if (error.statusCode === 409 && error.payload) {
+        const serverState = error.payload.serverState;
+        status.innerHTML = `<div class="callout warn"><strong>同步冲突</strong><p>服务器已有更新数据（r${error.payload.serverRevision}）。选择处理方式：</p>
+          <div class="stack">
+            <button class="primary" data-action="conflict-merge">合并（两边都保留，同字段取较新）</button>
+            <button class="secondary" data-action="conflict-overwrite">用本机数据覆盖服务器（服务器旧版本存入历史）</button>
+            <button class="secondary" data-action="conflict-download">下载服务器数据稍后处理</button>
+          </div></div>`;
+        const merge = async () => {
+          const { mergeStates } = await import("../../core/store.js");
+          const { fresh } = await import("../../core/schema.js");
+          const remoteState = { ...fresh(), ...serverState };
+          const merged = mergeStates(S.getState(), remoteState);
+          const result = await syncPush(merged, error.payload.serverRevision, "force");
+          S.update((s) => { s.state = merged; }, { silent: true });
+          S.markSynced(result.revision);
+          status.innerHTML = `<span class="pill success">已合并推送</span> r${result.revision}`;
+          rerender();
+        };
+        status.querySelector('[data-action="conflict-merge"]').onclick = merge;
+        status.querySelector('[data-action="conflict-overwrite"]').onclick = async () => {
+          const result = await syncPush(S.getState(), error.payload.serverRevision, "force");
+          S.markSynced(result.revision);
+          status.innerHTML = `<span class="pill success">已覆盖</span> r${result.revision}`;
+        };
+        status.querySelector('[data-action="conflict-download"]').onclick = () => {
+          import("../ui.js").then(({ download }) => download(JSON.stringify({ state: serverState }, null, 2), "server-data.json", "application/json"));
+        };
+      } else {
+        status.innerHTML = errorBox(error.message, error.code);
+      }
+    }
+  });
+
+  // 备份与导入
+  root.querySelector('[data-action="backup"]')?.addEventListener("click", () => {
+    const text = S.exportAll();
+    import("../ui.js").then(({ download, toast }) => {
+      download(text, "ai-learning-backup.json", "application/json");
+      toast("备份已导出，包含笔记、实验、归档与旧版原始数据。");
+    });
+  });
+  root.querySelector("#import")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const preview = root.querySelector("#import-preview");
+    try {
+      const text = await file.text();
+      importPlan = S.inspect(text);
+      const c = importPlan.conflicts;
+      preview.innerHTML = `
+        <div class="callout"><strong>导入预检</strong>
+        ${table(["项", "备份中", "当前"], [
+          ["笔记", String(importPlan.incoming.notes), String(importPlan.current.notes)],
+          ["运行记录", String(importPlan.incoming.runs), String(importPlan.current.runs)],
+          ["课程进度", String(importPlan.incoming.courses), String(importPlan.current.courses)],
+          ["项目", String(importPlan.incoming.projects), String(importPlan.current.projects)],
+          ["评价作答", String(importPlan.incoming.quizAttempts), String(importPlan.current.quizAttempts)],
+        ])}
+        <p>迁移来源：v${importPlan.migratedFrom} → v3 ${importPlan.migratedFrom < 3 ? "（自动迁移，旧 ID 与原始副本保留）" : ""}</p>
+        ${c.length ? `<p><strong>冲突 ${c.length} 处</strong>（同 ID 内容不同）：${c.slice(0, 6).map((x) => `${x.type}:${x.id}`).join("、")}${c.length > 6 ? "…" : ""}</p>` : "<p>无冲突。</p>"}
+        <div class="stack">
+          <button class="primary" data-action="import-replace">替换现有数据（推荐：${importPlan.suggestedMode === "replace" ? "预检建议" : "注意冲突"}）</button>
+          <button class="secondary" data-action="import-merge">合并导入（冲突取较新）</button>
+        </div></div>`;
+      preview.querySelector('[data-action="import-replace"]').onclick = () => doImport("replace");
+      preview.querySelector('[data-action="import-merge"]').onclick = () => doImport("merge");
+    } catch (error) {
+      preview.innerHTML = errorBox(`导入失败：${error.message}`, error.code);
+    }
+    e.target.value = "";
+  });
+  async function doImport(mode) {
+    const preview = root.querySelector("#import-preview");
+    try {
+      const fileInput = root.querySelector("#import");
+      const result = S.importData(importPlan.incomingState ? JSON.stringify({ state: importPlan.incomingState }) : "", mode);
+      preview.innerHTML = `<span class="pill success">导入完成</span> 模式：${mode === "merge" ? "合并" : "替换"}。导入前数据已备份到本机存储（ai-learning-import-backup），并下载为文件。`;
+      import("../ui.js").then(({ toast }) => toast("导入成功，页面即将刷新。"));
+      setTimeout(() => location.reload(), 900);
+    } catch (error) {
+      preview.innerHTML = errorBox(`导入失败：${error.message}`, error.code);
+    }
+  }
+  root.querySelector('[data-action="archive-export"]')?.addEventListener("click", () => {
+    const s = S.getState();
+    import("../ui.js").then(({ download }) =>
+      download(JSON.stringify({ archive: s.archive, runs: s.runs }, null, 2), "ai-learning-archive.json", "application/json"));
+  });
+  root.querySelector('[data-action="archive-clear"]')?.addEventListener("click", () => {
+    if (!confirm("清空归档记录？建议先导出。")) return;
+    S.update((s) => { s.archive = []; });
+    rerender();
+  });
+  root.querySelector('[data-action="wipe-local"]')?.addEventListener("click", () => {
+    if (!confirm("清除本浏览器全部学习数据？此操作不可撤销。请确认已导出备份。")) return;
+    ["ai-learning-lab-v3", "ai-learning-lab-v2", "ai-learning-platform-state-v1", "ai-learning-import-backup", "ai-learning-agent-checkpoint"].forEach((k) => localStorage.removeItem(k));
+    location.reload();
+  });
+  root.querySelector("#reduced-motion")?.addEventListener("change", (e) => {
+    S.update((s) => { s.settings.reducedMotion = e.target.checked; });
+    document.documentElement.classList.toggle("reduced-motion", e.target.checked);
+  });
+}
+
+function rerender() {
+  import("../app.js").then(({ rerender }) => rerender());
+}

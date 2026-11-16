@@ -839,6 +839,16 @@ export const coursesLlm = [
             note: "分辨率↑→token 数平方增长。",
           },
         ],
+        code: {
+          lang: "text",
+          run: "browser",
+          src:
+            "# 视觉 token 数量随分辨率平方增长\n"
+            + "# 224px / patch16 → 14×14 = 196 个图像 token\n"
+            + "# 448px / patch16 → 28×28 = 784 个图像 token（4 倍）\n"
+            + "# 上下文成本 = 文本 token + 图像 token",
+          expected: "分辨率翻倍 → 图像 token 约 4 倍，长图还会触发截断策略。",
+        },
         pitfalls: [
           "假设模型“看到”整幅图——它看到的是压缩后的 token 序列。",
           "图文对齐失败（图与问题不匹配）时的回答仍可能流畅——要检查输入。",

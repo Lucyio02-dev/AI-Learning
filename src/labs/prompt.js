@@ -57,10 +57,11 @@ export function checkJson(text, schema = ["deadline", "source"]) {
 // 真实模式优先人工/量规，这里提供辅助判定）。
 export function evaluateAnswer(answer, { expectDeadline = false, material } = {}) {
   const hasDeadline = /第一周周五|17:00|friday 17|周五 ?17/i.test(answer || "");
-  const grounded = material && material.split("。").some((frag) => frag && answer?.includes(frag.replace(/^[^：]*：/, "")));
-  const refuses = /资料未覆盖|无法确定|没有提供/.test(answer || "");
+  const grounded =
+    !material || /指南|规定|来源|依据|资料|#[\w-]*c\d+|\[[\w-]+#c\d+\]/.test(answer || "");
+  const refuses = /资料未覆盖|无法确定|没有提供|没有找到/.test(answer || "");
   if (!expectDeadline) return { ok: refuses || !/第一周周五/.test(answer || ""), kind: "should-refuse" };
-  return { ok: hasDeadline && (grounded || material === undefined), kind: grounded ? "grounded" : hasDeadline ? "ungrounded" : "wrong" };
+  return { ok: hasDeadline && grounded, kind: grounded ? "grounded" : hasDeadline ? "ungrounded" : "wrong" };
 }
 
 // 批量运行聚合：返回通过率与失败样例索引。

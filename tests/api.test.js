@@ -1,0 +1,228 @@
+// 后端 API 集成测试：启动真实服务器进程，覆盖健康/模型代理（无密钥时 503）/任务
+// 白名单/生命周期/账户隔离/同步冲突。RAG 查询在 embedding 就绪时抽样验证。
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+const ROOT = resolve(import.meta.dirname, "..");
+const PORT = 8790;
+const BASE = `http://127.0.0.1:${PORT}`;
+
+let server;
+let dataDir;
+
+async function waitForServer() {
+  for (let i = 0; i < 50; i++) {
+    try {
+      const res = await fetch(`${BASE}/api/health`);
+      if (res.ok) return res.json();
+    } catch {}
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  throw new Error("服务器未在预期时间内启动");
+}
+
+test.before(async () => {
+  dataDir = mkdtempSync(join(tmpdir(), "ai-learning-test-"));
+  server = spawn(process.execPath, ["server/index.js"], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: String(PORT), AI_LEARNING_DATA: dataDir, DEEPSEEK_API_KEY: "", GLM_API_KEY: "" },
+  });
+  await waitForServer();
+});
+
+test.after(() => {
+  server?.kill();
+  try {
+    rmSync(dataDir, { recursive: true, force: true });
+  } catch {}
+});
+
+test("健康检查：无密钥时明确报告 providers 未配置", async () => {
+  const data = await waitForServer();
+  assert.equal(data.ok, true);
+  const deepseek = data.providers.find((p) => p.id === "deepseek");
+  assert.equal(deepseek.configured, false);
+});
+
+test("静态资源可用且禁止路径穿越", async () => {
+  const index = await fetch(`${BASE}/`);
+  assert.equal(index.ok, true);
+  const ok = await fetch(`${BASE}/app.js`);
+  assert.equal(ok.status, 200);
+  const traversal = await fetch(`${BASE}/..%2f..%2fpackage.json`);
+  assert.ok([403, 404].includes(traversal.status), `穿越被拒绝：${traversal.status}`);
+});
+
+test("模型代理：未配置密钥时返回 503 与明确错误码", async () => {
+  const res = await fetch(`${BASE}/api/model/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }),
+  });
+  assert.equal(res.status, 503);
+  const data = await res.json();
+  assert.equal(data.code, "E_MODEL_NO_KEY");
+});
+
+test("任务 API：白名单外脚本拒绝；参数校验", async () => {
+  const bad = await fetch(`${BASE}/api/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ script: "server/index.js", args: [] }),
+  });
+  assert.equal(bad.status, 500);
+  const bad2 = await fetch(`${BASE}/api/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ script: "experiments/inference.py" }),
+  });
+  assert.equal(bad2.status, 400);
+});
+
+test("任务生命周期：启动 inference --check → 运行 → 成功 → 日志可读", async () => {
+  const create = await fetch(`${BASE}/api/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      script: "experiments/inference.py",
+      args: ["--check"],
+      label: "api-test-check",
+    }),
+  });
+  assert.equal(create.status, 200);
+  const { id } = await create.json();
+  let task;
+  for (let i = 0; i < 120; i++) {
+    const res = await fetch(`${BASE}/api/tasks/${id}`);
+    task = await res.json();
+    if (["succeeded", "failed", "cancelled", "timeout"].includes(task.status)) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.equal(task.status, "succeeded");
+  assert.match(task.log, /Dependency check passed/);
+  assert.ok(task.elapsedMs >= 0);
+  const list = await fetch(`${BASE}/api/tasks`);
+  const { tasks } = await list.json();
+  assert.ok(tasks.some((t) => t.id === id));
+});
+
+test("任务取消：排队/运行中的任务可取消（终态轮询）", async () => {
+  const create = await fetch(`${BASE}/api/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ script: "experiments/inference.py", args: ["--check"], label: "cancel-test" }),
+  });
+  const { id } = await create.json();
+  const cancel = await fetch(`${BASE}/api/tasks/${id}/cancel`, { method: "POST" });
+  assert.equal(cancel.status, 200);
+  let task;
+  for (let i = 0; i < 60; i++) {
+    const detail = await (await fetch(`${BASE}/api/tasks/${id}`)).json();
+    task = detail;
+    if (["cancelled", "succeeded", "failed", "timeout"].includes(detail.status)) break;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  assert.equal(task.status, "cancelled", `期望取消，实际 ${task.status}`);
+  // 取消后任务不再消耗并发：再起一个任务能正常运行
+  const next = await fetch(`${BASE}/api/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ script: "experiments/inference.py", args: ["--check"], label: "after-cancel" }),
+  });
+  assert.equal(next.status, 200);
+});
+
+test("未知 API 返回 404 JSON", async () => {
+  const res = await fetch(`${BASE}/api/nonexistent`);
+  assert.equal(res.status, 404);
+  const data = await res.json();
+  assert.equal(data.error, "未知 API");
+});
+
+// ---------- 账户隔离与同步冲突 ----------
+async function register(username, password) {
+  const res = await fetch(`${BASE}/api/accounts/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  assert.equal(res.status, 200, `register ${username}`);
+  return (await res.json()).token;
+}
+async function push(token, state, baseRevision, strategy) {
+  return fetch(`${BASE}/api/sync/push`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ state, baseRevision, strategy }),
+  });
+}
+
+test("账户：注册/登录/隔离；未认证访问同步被拒绝", async () => {
+  const token = await register("alice", "password123");
+  const noAuth = await fetch(`${BASE}/api/sync/pull`);
+  assert.equal(noAuth.status, 401);
+  const badLogin = await fetch(`${BASE}/api/accounts/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "alice", password: "wrong-pass" }),
+  });
+  assert.equal(badLogin.status, 401);
+  const weak = await fetch(`${BASE}/api/accounts/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: "bob", password: "123" }),
+  });
+  assert.equal(weak.status, 400);
+  return token;
+});
+
+test("第二个用户与第二个账户的数据隔离", async () => {
+  const alice = await register("alice-iso", "password123");
+  const bob = await register("bob-iso", "password456");
+  await push(alice, { notes: { a: { title: "Alice 的笔记" } } }, 0);
+  const bobPull = await (await fetch(`${BASE}/api/sync/pull`, {
+    headers: { Authorization: `Bearer ${bob}` },
+  })).json();
+  assert.equal(bobPull.state, null, "bob 看不到 alice 的数据");
+  const alicePull = await (await fetch(`${BASE}/api/sync/pull`, {
+    headers: { Authorization: `Bearer ${alice}` },
+  })).json();
+  assert.ok(alicePull.state?.notes?.a);
+});
+
+test("同步：baseRevision 过期返回 409 冲突；force 覆盖可成功", async () => {
+  const token = await register("carol", "password789");
+  const first = await push(token, { v: 1 }, 0);
+  assert.equal(first.status, 200);
+  // 用旧版本号再推 → 冲突
+  const conflict = await push(token, { v: 2 }, 0);
+  assert.equal(conflict.status, 409);
+  const payload = await conflict.json();
+  assert.equal(payload.code, "E_SYNC_CONFLICT");
+  assert.ok(payload.serverState);
+  // force 覆盖
+  const forced = await push(token, { v: 3 }, payload.serverRevision, "force");
+  assert.equal(forced.status, 200);
+  const { revision } = await forced.json();
+  const pulled = await (await fetch(`${BASE}/api/sync/pull`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })).json();
+  assert.equal(pulled.revision, revision);
+  assert.equal(pulled.state.v, 3);
+});
+
+test("RAG API：词项模式在纯 Node 环境可用（不依赖 embedding）", async () => {
+  const res = await fetch(`${BASE}/api/rag/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "选课课程退选截止时间", mode: "term", topK: 2 }),
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.ok(data.results.term.length, "词项检索有结果");
+  assert.ok(data.results.term.some((d) => d.docId === "current" || d.docId === "archive"));
+});

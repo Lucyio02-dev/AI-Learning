@@ -59,12 +59,16 @@ export function normalizeProgress(raw = {}) {
   const p = {};
   for (const [id, v] of Object.entries(object(raw) ? raw : {})) {
     if (!object(v)) continue;
+    // v2 遗留字段（explained/implemented/diagnosed/verified）只证明自报，
+    // 不冒充实验通过；v3 的 experimentPassed/reviewed 才是真实能力。
+    const legacy =
+      "diagnosed" in v || "verified" in v || "explained" in v || "implemented" in v;
     p[str(id, 80)] = {
       read: bool(v.read),
-      selfReported: bool(v.selfReported),
-      exercisePassed: bool(v.exercisePassed),
-      experimentPassed: bool(v.experimentPassed),
-      reviewed: bool(v.reviewed),
+      selfReported: bool(v.selfReported) || legacy,
+      exercisePassed: bool(v.exercisePassed) && !legacy,
+      experimentPassed: !legacy && bool(v.experimentPassed),
+      reviewed: !legacy && bool(v.reviewed),
       // v2 的 explained/implemented 字段不构成完整采集流程，
       // 迁移时降级为自报状态，避免冒充已验证能力。
       evidence: arr(v.evidence)
@@ -173,7 +177,6 @@ export function normalize(raw) {
 
 function base() {
   const s = fresh();
-  delete s.version;
   return s;
 }
 
@@ -273,6 +276,9 @@ function fromV3(raw) {
 // v2 → v3：保留全部可迁移数据，expl/impl 降级为自报，旧打卡不冒充能力。
 function fromV2(raw) {
   const s = fromV3({ ...structuredClone(raw), version: SCHEMA_VERSION });
+  if (object(raw.reports))
+    for (const [id, body] of Object.entries(raw.reports))
+      s.projects[str(id, 60)] = { ...(s.projects[str(id, 60)] || {}), stages: s.projects[str(id, 60)]?.stages || {}, report: str(body), linkedRunIds: s.projects[str(id, 60)]?.linkedRunIds || [] };
   for (const p of Object.values(s.progress)) {
     if (p.experimentPassed || p.diagnosed || p.verified) {
       p.experimentPassed = false;

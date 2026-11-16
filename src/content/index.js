@@ -1,7 +1,7 @@
 // 内容中心：课程、路线、实验信息、项目。ID 是平台稳定身份。
 import { coursesCommon } from "./courses-common.js";
 import { coursesLlm } from "./courses-llm.js";
-import { coursesEmbodied } from "./courses-embodied.js";
+import { coursesEmbodied, coursesResearch } from "./courses-embodied.js";
 
 export const tracks = {
   all: "全部课程",
@@ -11,7 +11,7 @@ export const tracks = {
   research: "研究专题",
 };
 
-export const courses = [...coursesCommon, ...coursesLlm, ...coursesEmbodied];
+export const courses = [...coursesCommon, ...coursesLlm, ...coursesEmbodied, ...coursesResearch];
 
 // 启动时一致性检查（开发与测试捕获；生产静默容错）。
 export function validateContent() {
