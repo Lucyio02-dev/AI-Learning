@@ -46,7 +46,7 @@ export function courseResults() {
       );
     return `<div class="search-meta muted">找到 ${sorted.length} 条相关内容</div><div class="course-grid">${sorted.slice(0, 24).map(({ e }) => searchCard(e)).join("")}</div>`;
   }
-  items = courses.filter((c) => !selected || c.track === selected);
+  items = courses.filter((c) => filters.track === "all" || c.track === filters.track);
   return `<div class="course-grid">${items.map(courseCard).join("")}</div>`;
 }
 

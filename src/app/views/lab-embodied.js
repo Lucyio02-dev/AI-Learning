@@ -4,6 +4,7 @@ import * as S from "../state.js";
 import { esc, icon, button, details, table, loading, errorBox, pill } from "../ui.js";
 import { hasBackend, createTask, waitForTask, taskDetail, listTasks } from "../api.js";
 import { runEpisode, FAULTS, faultProfiles, motion, rng } from "../../labs/kinematics.js";
+import { trainQLearning, qGridSvg, GRID } from "../../labs/qlearning.js";
 import { recordRun } from "../record.js";
 import { go } from "../router.js";
 
@@ -42,6 +43,14 @@ export function render() {
     </div>
     ${button("运行闭环 episode", "run-episode", "secondary full")}
     ${button("生成全部故障的特征对照表", "run-profiles", "secondary full")}
+    <span class="eyebrow">04 / RL BASICS</span>
+    <h2>强化学习基础：表格型 Q-learning</h2>
+    <p>5×5 网格、10% 执行噪声：观察奖励驱动的策略如何收敛，与模仿学习（BC）对比。</p>
+    <div class="control-pair">
+      <div><label for="q-eps">探索率 ε</label><select id="q-eps"><option>0</option><option selected>0.2</option><option>0.5</option></select></div>
+      <div><label for="q-eps2">训练轮数</label><select id="q-eps2"><option>100</option><option selected>300</option><option>800</option></select></div>
+    </div>
+    ${button("训练 Q-learning 并查看策略", "run-qlearn", "secondary full")}
     <span class="eyebrow">03 / REAL RUN</span>
     <h2>本地仿真与 BC 训练${ready ? "" : "（需后端）"}</h2>
     <div class="stack">
@@ -149,8 +158,32 @@ function faultSignature(fault, r) {
   return map[fault] || "";
 }
 
-export function runProfiles(root) {
-  const profiles = faultProfiles(7);
+export function runQlearn(root) {
+  const epsilon = Number(root.querySelector("#q-eps")?.value ?? 0.2);
+  const episodes = Number(root.querySelector("#q-eps2")?.value ?? 300);
+  const { qTable, history, greedyPath: path } = trainQLearning({ episodes, epsilon });
+  const curve = history.map((h) => `${h.episode}集:成功率${Math.round(h.successRate * 100)}%`).join(" · ");
+  root.querySelector("#output").innerHTML = `
+    <h3>Q-learning 策略（ε=${epsilon}，${episodes} 轮）</h3>
+    ${qGridSvg(qTable, path.path, path.reached)}
+    <div class="metric-strip">
+      <div><span>贪心路径到达目标</span><strong>${path.reached ? "是" : "否"}</strong></div>
+      <div><span>末段成功率</span><strong>${Math.round((history.at(-1)?.successRate || 0) * 100)}%</strong></div>
+      <div><span>步数</span><strong>${path.path.length}</strong></div>
+    </div>
+    <p class="caption">成功率曲线：${esc(curve)}</p>
+    <div class="callout"><strong>与 BC 的对比</strong><p>Q-learning 用奖励试错自己学（需要探索，调 ε 观察探索-利用权衡）；BC 从专家数据模仿（没有奖励信号，受数据分布限制）。两种范式适用于不同条件。</p></div>`;
+  recordRun({
+    lab: "embodied", mode: "rule", summary: `Q-learning ${episodes} 轮：末段成功率 ${Math.round((history.at(-1)?.successRate || 0) * 100)}%，贪心${path.reached ? "到达" : "未到达"}目标`,
+    passed: path.reached,
+    evidence: { history, path: path.path, reached: path.reached, epsilon, episodes },
+    config: { epsilon, episodes, grid: GRID },
+    statuses: { diagnosed: false, verified: path.reached },
+  });
+  refreshHistory(root);
+}
+
+export function runProfiles(root) {  const profiles = faultProfiles(7);
   root.querySelector("#output").innerHTML = `
     <h3>故障特征对照（同一种子同目标）</h3>
     ${table(["故障", "成功", "最终误差", "步数", "特征"], Object.entries(profiles).map(([k, v]) => `<tr><td>${esc(FAULTS[k])}</td><td>${v.success ? "✓" : "✗"}</td><td>${v.finalError}</td><td>${v.steps}</td><td><small>${esc(v.signature)}</small></td></tr>`))}
@@ -347,6 +380,7 @@ export function bind(root) {
   root.querySelector('[data-action="run-motion"]')?.addEventListener("click", () => runMotion(root));
   root.querySelector('[data-action="run-episode"]')?.addEventListener("click", () => runEpisodeView(root));
   root.querySelector('[data-action="run-profiles"]')?.addEventListener("click", () => runProfiles(root));
+  root.querySelector('[data-action="run-qlearn"]')?.addEventListener("click", () => runQlearn(root));
   root.querySelector('[data-action="emb-collect"]')?.addEventListener("click", () => collect(root));
   root.querySelector('[data-action="emb-train"]')?.addEventListener("click", () => train(root));
   root.querySelector('[data-action="emb-eval"]')?.addEventListener("click", () => evaluate(root));

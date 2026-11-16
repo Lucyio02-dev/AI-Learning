@@ -11,6 +11,7 @@ import { ragQuery } from "./src/rag.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const PORT = Number(process.env.PORT || 8787);
+const HOST = process.env.AI_LEARNING_HOST || "127.0.0.1"; // 局域网第二设备同步时设为 0.0.0.0
 const startedAt = new Date().toISOString();
 
 const TYPES = {
@@ -162,8 +163,8 @@ const server = createServer(async (req, res) => {
 
 await ensureDirs();
 await restoreTasks();
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`AI Learning 后端已启动: http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`AI Learning 后端已启动: http://${HOST === "0.0.0.0" ? "本机IP" : HOST}:${PORT}`);
   console.log(`数据目录: ${DATA_DIR}`);
   console.log(
     "模型密钥状态:",

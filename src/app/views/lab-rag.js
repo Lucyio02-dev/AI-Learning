@@ -50,6 +50,16 @@ export function render() {
       <option value="missing">正确证据缺失，应补充资料</option>
       <option value="grounding">已筛选版本，仍需核验引用与答案</option>
     </select>
+    <label class="check-row"><input id="r-gold" type="checkbox">人工指定正确证据（区分检索失败 vs 生成失败）</label>
+    <div class="control-pair">
+      <div><label for="r-gold-doc">指定证据文档</label><select id="r-gold-doc"><option value="current">当前学期选课指南</option><option value="archive">旧版选课说明</option><option value="library">图书馆</option><option value="lab">实验室预约</option></select></div>
+    </div>
+    <details class="fold"><summary>自选资料导入（受控，仅本机）</summary><div class="fold-body">
+      <label for="r-custom">粘贴你的资料（每段一条，用空行分隔；仅保存在本机，不发送到模型服务——生成引用时只会发送检索命中的片段）</label>
+      <textarea id="r-custom" rows="4" placeholder="我的课程规定：退选截止时间为……">${esc(customCorpusText())}</textarea>
+      <label class="check-row"><input id="r-use-custom" type="checkbox" ${customCorpusText() ? "checked" : ""}>把自选资料并入检索范围</label>
+      <small class="muted">导入会实际执行分块并展示元数据；embedding 模式下自选资料仅参与词项轨道（向量索引重建见项目空间阶段 2）。</small>
+    </div></details>
     <div class="stack">
       ${button("检索并查看证据", "run-rag", "primary full")}
       ${button("运行标注评测集（8 题）", "run-rag-eval", "secondary full")}
@@ -74,7 +84,44 @@ function runsHistory() {
 }
 
 function chunked(size, overlap) {
-  return corpus.flatMap((d) => chunkDocument(d, { size: Number(size), overlap: Number(overlap) }));
+  const useCustom = document.querySelector("#r-use-custom")?.checked;
+  const base = corpus.flatMap((d) => chunkDocument(d, { size: Number(size), overlap: Number(overlap) }));
+  if (!useCustom) return base;
+  const custom = parseCustomCorpus();
+  return [...base, ...custom.flatMap((d) => chunkDocument(d, { size: Number(size), overlap: Number(overlap) }))];
+}
+
+// 自选资料（受控导入）：localStorage 持久化，仅本机。
+const CUSTOM_KEY = "ai-learning-rag-custom-corpus";
+export function parseCustomCorpus() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CUSTOM_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((d) => d && d.id && d.text) : [];
+  } catch {
+    return [];
+  }
+}
+export function customCorpusText() {
+  return parseCustomCorpus().map((d) => d.text).join("\n\n");
+}
+export function saveCustomCorpus(text) {
+  const docs = String(text || "")
+    .split(/\n\s*\n/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+    .map((t, i) => ({
+      id: `custom-${i + 1}`,
+      title: `自选资料 ${i + 1}`,
+      date: new Date().toISOString().slice(0, 10),
+      version: "user",
+      current: true,
+      text: t.slice(0, 2000),
+    }));
+  try {
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify(docs));
+  } catch {}
+  return docs.length;
 }
 
 export async function run(root) {
@@ -89,17 +136,31 @@ export async function run(root) {
   const truncation = root.querySelector("#r-trunc").checked;
   const generate = root.querySelector("#r-gen").checked && hasBackend();
   const diagnosis = root.querySelector("#r-diagnosis").value;
+  // 自选资料先落盘（受控导入：仅本机）
+  const customText = root.querySelector("#r-custom")?.value ?? "";
+  const customCount = saveCustomCorpus(customText);
+  const goldOn = root.querySelector("#r-gold")?.checked;
+  const goldDoc = root.querySelector("#r-gold-doc")?.value || "current";
+  const goldEvidence = goldOn
+    ? chunked(chunkSize, overlap).filter((c) => c.docId === goldDoc).slice(0, 1)
+    : null;
   out.innerHTML = loading("检索中" + (generate ? "（含生成与引用核验）" : "") + "…");
 
   try {
-    if (mode === "term") {
+    if (mode === "term" && !goldEvidence) {
       // 纯浏览器词项检索
       const chunks = chunked(chunkSize, overlap);
       const docs = retrieve(query, { topK, currentOnly, missing, chunks });
       renderTermResult(root, { query, topK, chunkSize, overlap, currentOnly, missing }, docs, diagnosis);
       return;
     }
-    const res = await ragQuery({ query, topK, chunkSize, overlap, mode, currentOnly, missing, truncation, generate });
+    if (mode === "term" && goldEvidence) {
+      // gold-evidence 对照（词项基线轨道）：跳过检索直接用人工证据
+      const res = { results: { embedding: [], term: goldEvidence }, context: goldEvidence, metrics: { gold: [], retrievalHitEmbedding: null, retrievalHitTerm: null }, params: { goldEvidence: true }, generation: null };
+      renderServerResult(root, res, diagnosis, { topK, chunkSize, overlap, mode, currentOnly, missing, truncation, generate, gold: true });
+      return;
+    }
+    const res = await ragQuery({ query, topK, chunkSize, overlap, mode, currentOnly, missing, truncation, generate, goldEvidence });
     renderServerResult(root, res, diagnosis, { topK, chunkSize, overlap, mode, currentOnly, missing, truncation, generate });
   } catch (error) {
     out.innerHTML = errorBox(error.message, error.code);
@@ -142,8 +203,13 @@ function renderServerResult(root, res, diagnosis, params) {
   const out = root.querySelector("#output");
   const emb = res.results.embedding || [];
   const term = res.results.term || [];
-  const both = params.mode === "both";
-  const passed = diagnosisMatches(diagnosis, params) && (emb.length ? res.metrics.retrievalHitEmbedding === 1 : res.metrics.retrievalHitTerm === 1);
+  const both = params.mode === "both" && !params.gold;
+  const passed = params.gold
+    ? null
+    : diagnosisMatches(diagnosis, params) && (emb.length ? res.metrics.retrievalHitEmbedding === 1 : res.metrics.retrievalHitTerm === 1);
+  const goldBanner = params.gold
+    ? `<div class="callout"><strong>gold-evidence 对照：人工正确证据已直接提供给生成环节</strong><p>若回答恢复正常 → 原失败在检索环节；若仍错误 → 检查上下文构造、指令与模型能力。这是定位失败环节的标准方法。</p></div>`
+    : "";
   const chunkCard = (d, tag) => `<article class="evidence-card"><div class="card-meta"><span class="pill ${d.current ? "success" : ""}">${d.current ? "当前" : "历史"}${tag}</span><span>${d.score != null ? `分数 ${d.score}` : ""}</span></div><h3>${esc(d.title)}</h3><small>${esc(d.date || "")} · ${esc(d.id)}</small><p>${esc(d.text)}</p></article>`;
 
   let generationHtml = "";
@@ -166,6 +232,7 @@ function renderServerResult(root, res, diagnosis, params) {
   }
 
   out.innerHTML = `
+    ${goldBanner}
     <h3>检索对照</h3>
     ${res.metrics.gold.length ? `<div class="metric-strip"><div><span>检索命中（embedding / 词项）</span><strong>${res.metrics.retrievalHitEmbedding ?? "—"} / ${res.metrics.retrievalHitTerm ?? "—"}</strong></div><div><span>正确块</span><strong>${esc(res.metrics.gold.join(" "))}</strong></div></div>` : ""}
     ${both ? `<div class="control-pair"><div>${details("词项基线结果", term.length ? term.map((d) => chunkCard(d, "·词项")).join("") : "<p class='muted'>无召回</p>")}</div><div>${details("embedding 结果", emb.length ? emb.map((d) => chunkCard(d, "·向量")).join("") : "<p class='muted'>无召回</p>")}</div></div>`

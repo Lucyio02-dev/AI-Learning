@@ -1,51 +1,81 @@
-# AI Learning · 学习实验室
+# AI Learning · 学习实验室（完整版 3.0）
 
-后续完整版本开发请先阅读 [GLM 执行交接清单](./docs/GLM_HANDOFF_CHECKLIST.md)。用户要求整套完成后统一验收；当前状态与剩余任务以该清单为准。
+面向大学生与自学者的大模型、具身智能学习工作台：理解原理、运行真实实验、定位失败环节、验证修改。
 
-面向大学生与自学者的大模型、具身智能学习工作台。当前为重构首轮、本地数据版本。纯 ES Modules + CSS，无前端构建与运行依赖，继续兼容 GitHub Pages、Netlify 和 Vercel 静态托管。
+**当前状态**：完整版已交付。两条主线（大模型 / 具身智能）的核心流程已在真实环境验收，证据见 [docs/ACCEPTANCE.md](./docs/ACCEPTANCE.md)。范围与验收合同见 [docs/GLM_HANDOFF_CHECKLIST.md](./docs/GLM_HANDOFF_CHECKLIST.md)，架构决策见 [docs/ADR.md](./docs/ADR.md)。
 
-## 启动与检查
+## 启动（冷启动）
 
-要求 Node.js 20+。从项目目录执行：
+要求：Node.js 20+（后端），Python 3.10+ 与约 2GB 磁盘（真实实验，可选）。
 
 ```sh
+# 1. 前端 + 后端（一条命令）
 npm run dev
-npm run check
-npm test
+# 打开 http://127.0.0.1:8787 —— 页面会显示"完整模式 · N 个模型已配置"
+
+# 2. 真实实验环境（可选，首次运行会下载权重/模型）
+python -m pip install -r experiments/requirements.lock.txt
+python experiments/inference.py --check          # 依赖检查（不下载）
+python experiments/inference.py                  # 真实 CPU 推理（约 270MB 权重）
+
+# 3. 静态模式（无后端，GitHub Pages 场景）
+npm run static        # http://127.0.0.1:4173，规则实验与本地数据可用
 ```
 
-开发地址为 http://127.0.0.1:4173。ES Modules 需要 HTTP 服务，请勿直接双击 HTML。静态发布目录为仓库根目录。当前没有自动推送或线上发布。
+环境变量（后端，见 `server/.env.example`）：
+- `PORT`（默认 8787）、`AI_LEARNING_HOST`（第二设备同步时设 `0.0.0.0`）、`AI_LEARNING_DATA`（数据目录，默认 `server/data`）
+- `DEEPSEEK_API_KEY` / `GLM_API_KEY`（模型代理；**只在服务器环境变量中，前端永远接触不到**）
 
-## 本轮已实现
+## 检查与测试
 
-- 五个工作区：我的学习、学习路线、实验室、项目空间、资料与笔记。
-- 17 个课程节点，组织为公共基础、大模型、具身智能、研究专题，包含先修关系与四步阅读。
-- 原教材主题映射校正，教程与 Notebook 分别直达来源。
-- 4 个可运行互动实验：Prompt 固定规则对照、实际本地词项检索、Agent 故障流程模拟、二维坐标运动学。
-- 实验输入、证据、诊断与反馈记录，最多保留最近 100 次。通过的是具体教学案例，不代表完整职业能力认证。
-- 2 个项目指南、自动保存报告、关联实验记录与 Markdown 档案导出。
-- 笔记自动草稿、阅读状态与最近课程步骤恢复、资料收藏与搜索、外部视频链接、本机 PDF/视频预览。
-- v1 笔记及实验记录迁移，v1 完整原始对象保留在 v2 的 legacy 字段；旧打卡不换算为新能力。
-- JSON 导入校验；成功替换之前自动下载原数据备份。数据仍只保存在当前浏览器、当前网站地址下。localhost 与线上站点不共享存储，需要导出/导入迁移。
+```sh
+npm run check        # 全部 JS 语法检查（前端 31 模块 + 后端）
+npm test             # 39 个自动化测试（迁移/引擎/API 集成/隔离/冲突）
+npm run pycheck      # Python 实验脚本语法检查
+node scripts/link-check.mjs   # 课程引用链接可达性核对
+```
 
-## 实验的真实性边界
+## 两种模式
 
-Prompt 是规则教学示例；Agent 是确定性故障流程；空间实验是无噪声的二维运动学。这些均不调用大模型或控制真实机器人。RAG 实验实际计算词项匹配排序，使用 4 份虚构校园材料，不包含 embedding 或生成模型。
+| 能力 | 本地模式（纯静态） | 完整模式（本地后端） |
+| --- | --- | --- |
+| 课程/笔记/诊断/地图/搜索 | ✅ | ✅ |
+| 规则实验、词项检索、2D 仿真、Q-learning | ✅ | ✅ |
+| 真实模型调用（Prompt/RAG 生成/助教） | 显示需要后端 | ✅ 密钥隔离在服务端 |
+| 真实 embedding 检索 | — | ✅ bge-small-zh，CPU |
+| 实验/训练任务（推理/BC/评测） | — | ✅ 子进程隔离执行 |
+| 账户与跨设备同步 | — | ✅ 本地账户体系 |
 
-`experiments/inference.py` 是可执行的真实小模型 CPU 推理脚本，提供依赖检查与生成模式。它需要独立安装 Python 依赖、下载权重。本轮完成语法检查，尚未下载模型并验证端到端运行。依赖当前提供兼容范围，尚未完成环境锁定；不应把它标为已验证的训练实验。
+## 数据与迁移
 
-## 代码结构
+- 本地数据存于浏览器 localStorage（键 `ai-learning-lab-v3`），导出/导入带预检与冲突展示；导入前自动落双备份（本机存储 + 下载文件）。
+- v1/v2 旧数据自动迁移：笔记与实验文本保留，旧打卡降级为"自报"，不冒充能力证据；原始副本完整保留在 `legacy` 字段。
+- 同步：设置页注册/登录后推送/拉取；按版本号乐观并发，冲突时可选合并/覆盖/下载。
+- 容量：实验记录超 100 条自动**归档**（不丢弃），可导出。
 
-- `src/content.js`：课程、先修、教材与项目规范。
-- `src/store.js`：状态、导入校验与旧数据迁移。
-- `src/labs.js`：独立检索、故障状态转换与运动学逻辑。
-- `app.js`：工作区、交互与实验反馈。
-- `styles.css`：统一样式与响应式布局。
-- `tests/core.test.js`：关键行为回归。
-- `docs/ROADMAP.md`：分期实施与验收。
+## 目录结构
 
-## 数据与内容维护
+```
+app.js                  入口（路由装配 + 全局事件）
+src/core/               schema v3、迁移链、错误码、存储
+src/content/            24 门课程（问题情境/预测/公式/代码/陷阱/修改/验证/深度/引用）
+src/labs/               实验引擎（Prompt/RAG词项/Agent工具契约/运动学/Q-learning）
+src/app/                状态、API 客户端、路由、视图（views/）
+server/                 Node 后端（纯标准库）：模型代理/任务执行器/账户同步/RAG 服务
+experiments/            Python 真实实验（inference/rag_embed/basics/embodied）
+tests/                  自动化测试
+docs/                   ADR、验收记录、链接核对、复现实例
+```
 
-所有本地 PDF/视频只在浏览器中打开。外部资料在新标签打开。模型密钥、远端执行、账户与云端同步尚未接入。旧版 cache-first service worker 改为退役迁移脚本，不再长期缓存旧教材与代码。
+## 部署
 
-原教材来源：<https://github.com/Lordog/dive-into-llms>。主题映射核对日期：2026-11-16；外部 Notebook 的依赖、运行效果与算力要求尚未逐项验证。专题课程目前是外部实践指南。完整课程制作、真实模型对照与仿真策略训练仍需后续建设。
+- **静态托管**（GitHub Pages / Netlify / Vercel）：仓库根目录即静态站点，现有 `netlify.toml`、`vercel.json`、`.github/workflows/check.yml` 直接可用。线上为本地模式。
+- **完整模式**：在自有机器/服务器运行 `npm run server`，静态站点与后端同源部署（把仓库根目录指向前端托管即可，或直接用后端的静态服务）。云端公网部署属外部条件，未执行发布（见验收记录"真实阻塞"）。
+
+## 真实性边界
+
+- Prompt/RAG/Agent 实验室明确标注规则演示与真实调用的区别；真实调用记录模型版本、参数、耗时、token 与费用估算。
+- BC 训练标注 `kind=own-training`（自己训练），与"运行官方预训练策略"严格区分；2D 仿真无动力学，不代表真实设备。
+- 助教不伪造来源：课程资料未覆盖时明确声明"基于通用知识"。
+
+原教材来源：[Lordog/dive-into-llms](https://github.com/Lordog/dive-into-llms)。主题映射核对日期 2026-11-16（37/37 链接可达，见 `artifacts/logs/link-check.txt`）；外部 Notebook 的依赖与算力要求以原教材说明为准，平台仅作引用与扩展，不复制整本教材。

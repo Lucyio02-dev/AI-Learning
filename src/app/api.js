@@ -70,8 +70,13 @@ export const cancelTask = (id) => request(`/api/tasks/${id}/cancel`, { method: "
 export const ragQuery = (payload) =>
   request("/api/rag/query", { method: "POST", body: payload });
 
-export const register = (username, password) =>
-  request("/api/accounts/register", { method: "POST", body: { username, password } });
+export const register = (username, password) => {
+  const result = request("/api/accounts/register", { method: "POST", body: { username, password } });
+  return result.then((data) => {
+    localStorage.setItem(tokenKey, data.token);
+    return data;
+  });
+};
 export const login = (username, password) => {
   const result = request("/api/accounts/login", { method: "POST", body: { username, password } });
   return result.then((data) => {

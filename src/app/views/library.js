@@ -5,7 +5,7 @@ import { esc, icon, button, details, sectionHead, pill, fmtTime } from "../ui.js
 import { courses, tracks, courseSearchEntries } from "../../content/index.js";
 import { go } from "../router.js";
 
-export const filters = { query: "", type: "all", dir: "all", favOnly: false };
+export const filters = { query: "", type: "all", dir: "all", level: "all", favOnly: false };
 let noteId = null;
 let pdfUrl = null, videoUrl = null, pdfFileId = "local-pdf", videoFileId = "local-video";
 
@@ -37,6 +37,9 @@ export function render(route) {
   </div>
   <div class="tabs" role="group" aria-label="方向">
     ${[["all", "全部方向"], ...Object.entries(tracks).filter(([k]) => k !== "all")].map(([v, t]) => `<button class="tab ${filters.dir === v ? "selected" : ""}" data-rdir="${v}" aria-pressed="${filters.dir === v}">${t}</button>`).join("")}
+  </div>
+  <div class="tabs" role="group" aria-label="难度">
+    ${[["all", "全部难度"], ["basic", "起步/基础"], ["advanced", "进阶/研究"]].map(([v, t]) => `<button class="tab ${filters.level === v ? "selected" : ""}" data-rlevel="${v}" aria-pressed="${filters.level === v}">${t}</button>`).join("")}
   </div>
   <label class="check-row"><input id="fav-only" type="checkbox" ${filters.favOnly ? "checked" : ""}>只看收藏</label>
 </div>
@@ -115,6 +118,12 @@ export function resourceResults(s) {
   const items = entries.filter((r) => {
     if (filters.type !== "all" && r.kind !== filters.type) return false;
     if (filters.dir !== "all" && r.track !== filters.dir && !(filters.dir === "research" && r.track === "research")) return false;
+    if (filters.level !== "all") {
+      const c = courses.find((x) => x.id === r.courseId);
+      const lvl = c?.level || "";
+      if (filters.level === "basic" && !/起步|基础/.test(lvl)) return false;
+      if (filters.level === "advanced" && !/进阶|研究/.test(lvl)) return false;
+    }
     if (filters.favOnly && !S.resourceState(r.id).favorite) return false;
     if (q && !`${r.title} ${r.text}`.toLowerCase().includes(q)) return false;
     return true;
@@ -159,6 +168,14 @@ export function bind(root) {
     b.addEventListener("click", () => {
       filters.dir = b.dataset.rdir;
       root.querySelectorAll("[data-rdir]").forEach((x) => x.classList.toggle("selected", x === b));
+      root.querySelector("#resources").innerHTML = resourceResults(S.getState());
+      bindResources(root);
+    }),
+  );
+  root.querySelectorAll("[data-rlevel]").forEach((b) =>
+    b.addEventListener("click", () => {
+      filters.level = b.dataset.rlevel;
+      root.querySelectorAll("[data-rlevel]").forEach((x) => x.classList.toggle("selected", x === b));
       root.querySelector("#resources").innerHTML = resourceResults(S.getState());
       bindResources(root);
     }),

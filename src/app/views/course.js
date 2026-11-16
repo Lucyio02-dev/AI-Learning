@@ -59,6 +59,10 @@ export function render(route) {
     ${(c.quiz || []).length ? quizBlock(c) : ""}
     <div class="section-title"><h3>延伸资料</h3><span class="muted">来源链接 · 外部打开</span></div>
     ${(c.references || []).map((r) => `<a class="resource-link" href="${esc(r.url)}" target="_blank" rel="noreferrer"><span>${esc(r.title)}<small>${esc(r.kind)} · 核对 ${esc(r.verified?.date || "未标注")}（${esc(r.verified?.env || "外部来源")}）</small></span>↗</a>`).join("")}
+    ${details("链接失效或内容有问题？", `<p class="muted">复制下面的反馈信息发给维护者（或保存为文件），附上你看到的现象：</p><textarea class="feedback-draft" rows="3" readonly>课程: ${esc(c.title)} (id=${esc(c.id)})
+问题: [链接失效 | 内容错误 | 运行环境不符]
+链接: ${esc((c.references || [])[0]?.url || "无")}
+环境: [浏览器/后端版本] 日期: ${new Date().toISOString().slice(0, 10)}</textarea><button class="secondary" data-action="copy-feedback">复制反馈</button>`)}
     ${cur.limits ? `<p class="caption">结论与局限：${esc(cur.limits)}</p>` : ""}
     ${c.track === "research" ? `<p class="caption">研究专题提示：${esc(c.limits || "")}</p>` : ""}
   </article>
@@ -152,6 +156,16 @@ export function bind(root) {
     S.saveNote(id, { body: note.value, title: S.getState().notes[id]?.title || getCourse(id)?.title || id, links: { course: [id], resource: [], lab: [], run: [] } });
     const status = root.querySelector("#draft-status");
     if (status) status.textContent = "草稿已保存 · " + new Date().toLocaleTimeString("zh-CN");
+  });
+  root.querySelector('[data-action="copy-feedback"]')?.addEventListener("click", (e) => {
+    const text = e.currentTarget.closest(".fold")?.querySelector(".feedback-draft")?.value || "";
+    navigator.clipboard?.writeText(text).then(
+      () => import("../ui.js").then(({ toast }) => toast("反馈已复制到剪贴板")),
+      () => import("../ui.js").then(({ toast, download }) => {
+        download(text, "内容反馈.txt", "text/plain;charset=utf-8");
+        toast("剪贴板不可用，已下载反馈文件");
+      }),
+    );
   });
   bindQuiz(root);
 }

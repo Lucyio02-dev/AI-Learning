@@ -131,7 +131,7 @@ function traceHtml(run) {
           ? `<code>${esc(JSON.stringify(t.errors))}</code>`
           : esc(t.note || "");
     return `<tr><td>t${t.t}</td><td>${esc(kindLabel)}</td><td><code>${esc(t.tool || "")}</code><small class="muted">${esc(JSON.stringify(t.masked || t.params || {}))}</small></td><td>${detail}</td></tr>`;
-  }).join("");
+  });
   return `<h3>执行轨迹（敏感字段已脱敏）</h3>${table(["时间", "阶段", "工具与参数", "返回/错误"], rows)}
   <div class="metric-strip">
     <div><span>写入次数</span><strong>${run.writes}</strong></div>
