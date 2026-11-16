@@ -1,11 +1,11 @@
 {
-  "name": "AI大学习平台",
-  "short_name": "AI大学习",
-  "description": "面向大模型学习、实践、阅读、视频和笔记的网页学习平台。",
+  "name": "AI Learning · 学习实验室",
+  "short_name": "AI Learning",
+  "description": "理解、实现、诊断、验证：大模型与具身智能学习实验室。",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#f7f8fb",
-  "theme_color": "#111820",
+  "background_color": "#f5f6f3",
+  "theme_color": "#203f34",
   "lang": "zh-CN",
   "icons": []
 }

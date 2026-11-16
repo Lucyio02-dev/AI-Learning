@@ -1,0 +1,12 @@
+# 已验证环境（Windows 10.0.26200 x64, Python 3.14.5, CPU）
+# 2026-11-16 由完整版开发代理实际运行验证：
+#   python experiments/inference.py --check  → 通过
+#   python experiments/inference.py          → 真实下载 SmolLM2-135M-Instruct 并生成
+# 安装：python -m pip install -r experiments/requirements.lock.txt
+torch==2.12.0
+transformers==5.23.0
+numpy==2.4.4
+safetensors==0.8.0
+huggingface_hub>=1.22,<2
+tokenizers==0.23.3
+tqdm==4.68.2
