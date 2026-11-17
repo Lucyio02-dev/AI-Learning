@@ -69,8 +69,8 @@ docs/                   ADR、验收记录、链接核对、复现实例
 
 ## 部署
 
-- **静态托管**（GitHub Pages / Netlify / Vercel）：仓库根目录即静态站点，现有 `netlify.toml`、`vercel.json`、`.github/workflows/check.yml` 直接可用。线上为本地模式。
-- **完整模式**：在自有机器/服务器运行 `npm run server`，静态站点与后端同源部署（把仓库根目录指向前端托管即可，或直接用后端的静态服务）。云端公网部署属外部条件，未执行发布（见验收记录"真实阻塞"）。
+- **静态托管**（GitHub Pages / Netlify / Vercel）：运行 `npm run build:site` 生成 `dist/`；GitHub Pages 由 `.github/workflows/pages.yml` 自动构建并发布 `dist/`。线上为本地模式，学习数据保存在访问者的浏览器。
+- **完整模式**：在自有机器/服务器运行 `npm run server`，静态站点与后端同源部署（把 `dist/` 指向前端托管，或直接用后端的静态服务）。模型调用、任务执行和账户同步需要后端支持。
 
 ## 真实性边界
 
