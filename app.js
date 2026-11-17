@@ -5,6 +5,7 @@ import { initRouter, register, currentRoute, go, parseRoute } from "./src/app/ro
 import { probe, hasBackend, backendProbed } from "./src/app/api.js";
 import { esc, icon, toast, download, fmtTime } from "./src/app/ui.js";
 import { validateContent } from "./src/content/index.js";
+import { release } from "./src/app/release.js";
 
 import * as home from "./src/app/views/home.js";
 import * as diagnostic from "./src/app/views/diagnostic.js";
@@ -23,7 +24,7 @@ import * as quiz from "./src/app/views/quiz.js";
 import * as settings from "./src/app/views/settings.js";
 
 const root = document.querySelector("#app");
-let modeLabel = "检测后端中…";
+let modeLabel = "检查计算服务…";
 
 register("home", home);
 register("diagnostic", diagnostic);
@@ -50,10 +51,12 @@ function labBind(route, el) {
 const NAV = [
   ["home", "home", "我的学习"],
   ["routes", "map", "学习路线"],
+  ["map", "map", "学习地图"],
   ["labs", "lab", "实验室"],
   ["projects", "project", "项目空间"],
   ["library", "book", "资料与笔记"],
   ["quiz", "check", "能力评价"],
+  ["tutor", "sun", "AI 助教"],
 ];
 
 function shell(body) {
@@ -66,7 +69,7 @@ function shell(body) {
       <div class="nav-label">WORKSPACE</div>
       <nav aria-label="主导航">${NAV.map(([p, i, t]) => `<button data-page="${p}" class="nav-item ${active(p) ? "active" : ""}" ${route.page === p ? 'aria-current="page"' : ""}>${icon(i)}<span>${t}</span></button>`).join("")}</nav>
       <div class="sidebar-bottom">
-        <div class="mode-indicator" id="mode-indicator" title="${hasBackend() ? "本地后端已连接：真实模型、embedding 与训练实验可用" : "纯静态模式：本地数据与规则实验可用"}">
+        <div class="mode-indicator" id="mode-indicator" title="${hasBackend() ? "计算服务已连接：可使用已配置的模型、向量检索、训练和同步" : "课程、笔记、规则实验和仿真直接在浏览器运行；模型与训练需要计算服务"}">
           <span class="status-dot ${hasBackend() ? "ok" : ""}"></span><span>${esc(modeLabel)}</span>
         </div>
         <p>笔记与实验保存在此浏览器<br>定期备份，让积累留得住。</p>
@@ -81,7 +84,7 @@ function shell(body) {
         <div class="top-meta"><span class="status-dot"></span><span id="save-status">保存在此浏览器</span><button class="avatar" data-page="settings" aria-label="打开设置">学</button></div>
       </header>
       <main id="main" tabindex="-1">${body}</main>
-      <footer>AI LEARNING LAB <span>理解 · 实现 · 诊断 · 验证</span><span>完整版 3.0 · ${hasBackend() ? "完整模式" : "本地模式"}</span></footer>
+      <footer>AI LEARNING LAB <span>理解 · 实现 · 诊断 · 验证</span><span>v${release.version} · ${hasBackend() ? "已连接计算服务" : "浏览器学习"}</span></footer>
     </div>
   </div>`;
 }
@@ -162,7 +165,7 @@ async function boot() {
     const health = await probe();
     modeLabel = health.ok
       ? `完整模式 · ${health.providers.filter((p) => p.configured).length} 个模型已配置`
-      : "本地模式（未检测到后端）";
+      : "浏览器学习模式";
     render();
   } catch (error) {
     console.error("启动失败：", error);
@@ -173,7 +176,7 @@ async function boot() {
 
 boot();
 
-// 退役旧 service worker（避免旧缓存遮蔽修复）。
+// 最新页面加载后也清理本应用的旧 worker；学习数据始终保留。
 if ("serviceWorker" in navigator)
   navigator.serviceWorker
     .getRegistrations()
@@ -183,3 +186,9 @@ if ("serviceWorker" in navigator)
         .forEach((r) => r.unregister()),
     )
     .catch(() => {});
+if ("caches" in globalThis) caches.delete("ai-learning-platform-v1").catch(() => {});
+const upgradedUrl = new URL(location.href);
+if (upgradedUrl.searchParams.has("app-upgrade")) {
+  upgradedUrl.searchParams.delete("app-upgrade");
+  history.replaceState(history.state, "", upgradedUrl.href);
+}

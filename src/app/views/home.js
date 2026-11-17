@@ -18,6 +18,12 @@ export function render() {
     "把好奇心，变成真正的能力。",
     "从一个问题开始，带着证据继续向前。",
   )}
+<div class="workspace-shortcuts" aria-label="学习工作台常用入口">
+  <button class="text-button" data-page="map">完整学习地图 ${icon("arrow")}</button>
+  <button class="text-button" data-page="library">资料与笔记 ${icon("arrow")}</button>
+  <button class="text-button" data-page="tutor">课程 AI 助教 ${icon("arrow")}</button>
+  <button class="text-button" data-page="settings">导入已有学习记录 ${icon("arrow")}</button>
+</div>
 <div class="home-grid">
   <section class="hero">
     <div class="hero-top"><span class="pill dark">你的下一步</span><span>${esc(next.reason)}</span></div>
