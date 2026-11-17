@@ -1934,3 +1934,10 @@ details > summary { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .reduced-motion, .reduced-motion * { animation: none !important; transition: none !important; }
 }
+
+.workspace-shortcuts { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: -8px 0 24px; }
+.workspace-shortcuts .text-button { display: inline-flex; align-items: center; gap: 6px; }
+.workspace-shortcuts svg { width: 15px; height: 15px; }
+.release-panel { margin-bottom: 24px; }
+.release-panel .caption { overflow-wrap: anywhere; }
+.release-panel table { min-width: 0; }

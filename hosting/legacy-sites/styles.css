@@ -1,0 +1,19 @@
+:root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #203c34; background: #f5f6f3; line-height: 1.8; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(800px, 100%); padding: 60px 28px; margin: auto; }
+.brand { text-decoration: none; font-weight: 750; color: #203f34; }
+.brand span { font-size: 13px; margin-left: 12px; font-weight: 400; }
+.eyebrow { font-size: 11px; letter-spacing: .16em; margin-top: 52px; color: #6f8171; }
+h1 { font-size: clamp(28px, 5vw, 42px); line-height: 1.4; margin: 16px 0; }
+h2 { font-size: 21px; margin-top: 0; }
+p { color: #5f7066; }
+.primary, button { border-radius: 9px; border: 1px solid #dce2d6; padding: 12px 18px; font: inherit; font-size: 14px; cursor: pointer; }
+.primary { background: #203f34; display: inline-block; color: white; text-decoration: none; margin: 16px 0 30px; }
+section { background: #fff; border: 1px solid #e2e6dd; border-radius: 18px; padding: 28px; }
+button { background: #e8eedb; color: #203f34; }
+#recover { background: #fff; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.caption, #transfer-status { font-size: 13px; overflow-wrap: anywhere; }
+:focus-visible { outline: 3px solid #78935a; outline-offset: 3px; }
+@media (max-width: 450px) { main { padding: 32px 20px; } section { padding: 20px; } }

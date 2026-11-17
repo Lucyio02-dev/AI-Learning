@@ -3,16 +3,29 @@ import * as S from "../state.js";
 import { esc, button, details, table, pill, sectionHead, loading, errorBox, fmtTime } from "../ui.js";
 import { hasBackend, register, login, logout, clearToken, hasToken, syncPull, syncPush } from "../api.js";
 import { go } from "../router.js";
+import { release } from "../release.js";
+import { courses, labInfo, projects } from "../../content/index.js";
 
 let importPlan = null;
 
 export function render() {
   const s = S.getState();
   const sync = s.sync || {};
-  return `${sectionHead("SETTINGS", "数据、账户与同步。", "本机数据归你所有；同步是可选的，本地模式下全部核心功能可用。")}
+  return `${sectionHead("SETTINGS", "数据、账户与同步。", "课程、笔记、规则实验和仿真可直接使用。真实模型、训练与账户同步由计算服务提供。")}
+<section class="panel release-panel">
+  <div class="section-title"><h2>学习实验室 v${release.version}</h2><span class="pill">基于 ${release.baseline} 持续迭代</span></div>
+  <p>同一套工作台包含 ${courses.length} 门课程、${Object.keys(labInfo).length} 个实验室、${projects.length} 个项目，以及学习地图、能力评价、资料笔记与 AI 助教。</p>
+  <p class="caption">正式入口：<a href="${release.canonicalUrl}">${release.canonicalUrl}</a>。学习数据沿用 v3 格式；版本升级会保留此网址下的笔记、课程进度和实验记录。</p>
+  <div id="release-status" class="caption" aria-live="polite"></div>
+  ${table(["功能", "当前状态"], [
+    ["课程、开源案例、项目任务、资料笔记", "可在浏览器使用"],
+    ["Prompt 规则、RAG 词项、Agent、2D 仿真与 Q-learning", "可在浏览器运行"],
+    ["真实模型、向量检索、Python 训练、账户同步", hasBackend() ? "已连接计算服务，依赖与模型配置以服务状态为准" : "实现已保留，当前站点尚未连接计算服务"],
+  ])}
+</section>
 <div class="lower-grid">
   <section class="panel">
-    <h2>账户（本地后端）</h2>
+    <h2>账户与计算服务</h2>
     ${hasBackend()
       ? hasToken()
         ? `<p>已登录：<strong>${esc(sync.account?.username || "本地账户")}</strong>（数据按用户隔离存储在本地后端）</p>
@@ -35,7 +48,7 @@ export function render() {
              <button class="secondary" data-action="account-login">登录</button>
            </div>
            <p class="caption">同一账户在第二台设备/浏览器登录即可验证隔离与同步。密码经 scrypt 加盐哈希后存于本地后端。</p>`
-      : `<p class="muted">需要本地后端（npm run server）。本地模式不影响核心学习功能。</p>`}
+      : `<p class="muted">当前公开站点提供浏览器学习。账户同步、真实模型和训练需要部署计算服务；连接后沿用这一套课程、实验和学习数据。</p>`}
     <div id="sync-status" aria-live="polite"></div>
   </section>
   <section class="panel">
@@ -48,6 +61,7 @@ export function render() {
     </div>
     <div id="import-preview"></div>
     <p class="caption">导入前会先将当前数据保存在本机恢复备份中；预检显示范围与冲突，替换或合并由你选择。</p>
+    <p class="caption">从昨天的本机地址或旧在线地址切换过来时，请先在原地址导出备份，再在这里选择“合并”。不同网址的浏览器存储互相独立，页面空白不代表原记录被删除。</p>
   </section>
 </div>
 <div class="lower-grid">
@@ -74,6 +88,14 @@ export function render() {
 }
 
 export function bind(root) {
+  const releaseStatus = root.querySelector("#release-status");
+  fetch(new URL("./release.json", location.href), { cache: "no-store" })
+    .then((res) => res.ok ? res.json() : null)
+    .then((info) => {
+      if (!info || !releaseStatus?.isConnected) return;
+      releaseStatus.textContent = `本次发布：v${info.version} · 提交 ${String(info.commit || "未记录").slice(0, 7)}${info.builtAt ? ` · ${fmtTime(info.builtAt)}` : ""}`;
+    })
+    .catch(() => {});
   // 账户
   root.querySelector('[data-action="account-register"]')?.addEventListener("click", async () => {
     const status = root.querySelector("#sync-status");

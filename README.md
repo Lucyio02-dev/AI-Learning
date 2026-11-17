@@ -1,8 +1,8 @@
-# AI Learning · 学习实验室（完整版 3.0）
+# AI Learning · 学习实验室（3.1）
 
 面向大学生与自学者的大模型、具身智能学习工作台：理解原理、运行真实实验、定位失败环节、验证修改。
 
-**当前状态**：完整版已交付。两条主线（大模型 / 具身智能）的核心流程已在真实环境验收，证据见 [docs/ACCEPTANCE.md](./docs/ACCEPTANCE.md)。范围与验收合同见 [docs/GLM_HANDOFF_CHECKLIST.md](./docs/GLM_HANDOFF_CHECKLIST.md)，架构决策见 [docs/ADR.md](./docs/ADR.md)。
+**在线入口**：[GitHub Pages 学习工作台](https://lucyio02-dev.github.io/AI-Learning/)。3.1 在 3.0 工作台上整合课程案例、数据修复与在线发布，沿用 v3 学习数据。整合范围、版本关系和剩余工作见 [版本整合记录](./docs/VERSION_INTEGRATION.md)。两条主线（大模型 / 具身智能）的已有验收证据见 [docs/ACCEPTANCE.md](./docs/ACCEPTANCE.md)；仍未完成的范围继续保留在 [交接清单](./docs/GLM_HANDOFF_CHECKLIST.md) 与 [路线图](./docs/ROADMAP.md)。
 
 ## 启动（冷启动）
 
@@ -30,7 +30,7 @@ npm run static        # http://127.0.0.1:4173，规则实验与本地数据可�
 
 ```sh
 npm run check        # 全部 JS 语法检查（前端 31 模块 + 后端）
-npm test             # 39 个自动化测试（迁移/引擎/API 集成/隔离/冲突）
+npm test             # 自动化回归（迁移/引擎/API/隔离/冲突/缓存升级/发布模块完整性）
 npm run pycheck      # Python 实验脚本语法检查
 node scripts/link-check.mjs   # 课程引用链接可达性核对
 ```
@@ -69,8 +69,9 @@ docs/                   ADR、验收记录、链接核对、复现实例
 
 ## 部署
 
-- **静态托管**（GitHub Pages / Netlify / Vercel）：运行 `npm run build:site` 生成 `dist/`；GitHub Pages 由 `.github/workflows/pages.yml` 自动构建并发布 `dist/`。线上为本地模式，学习数据保存在访问者的浏览器。
+- **静态托管**（GitHub Pages / Netlify / Vercel）：运行 `npm run build:site` 生成 `dist/`；GitHub Pages 由 `.github/workflows/pages.yml` 自动构建并发布 `dist/`。所有应用模块和样式位于同一个内容版本目录，根目录保留首页、发布信息与旧缓存退役脚本。线上为浏览器学习模式，学习数据保存在访问者的浏览器。
 - **完整模式**：在自有机器/服务器运行 `npm run server`，静态站点与后端同源部署（把 `dist/` 指向前端托管，或直接用后端的静态服务）。模型调用、任务执行和账户同步需要后端支持。
+- **迭代**：功能分支提交 → PR 校验 → 合并 `main` → Pages 自动发布。`main` 代表通过校验的发布版本，可以持续重构；3.0 的功能和原始计划保留在提交历史与文档中。每个正式版本以 Git 标签记录，`release.json` 可核对线上版本与源码提交。
 
 ## 真实性边界
 
