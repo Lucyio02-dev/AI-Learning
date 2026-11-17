@@ -1,0 +1,28 @@
+name: Validate learning lab
+on:
+  pull_request:
+  push:
+    branches: [main, feat/learning-lab-v2]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # 依赖锁定：前端与后端零第三方 npm 依赖；Python 仅语法检查不装包
+      - name: Install python deps for syntax check
+        run: python -m pip install numpy
+      - run: npm run check
+      - run: npm test
+      - run: npm run pycheck
+      - name: Verify backend boots and serves health
+        run: |
+          node server/index.js &
+          sleep 2
+          curl -fsS http://127.0.0.1:8787/api/health | grep -q '"ok":true'
+          curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:8787/ | grep -q 200

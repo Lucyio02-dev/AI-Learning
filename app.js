@@ -1,1055 +1,185 @@
-const REPO = "https://github.com/Lordog/dive-into-llms";
-const COURSE = "https://hiascend.com/developer/courses/detail/1578542990315864066";
-const STORE_KEY = "ai-learning-platform-state-v1";
+// AI Learning · 学习实验室 —— 应用入口。
+// 职责：装配路由与视图、全局事件委托、后端探测与模式标注。
+import * as S from "./src/app/state.js";
+import { initRouter, register, currentRoute, go, parseRoute } from "./src/app/router.js";
+import { probe, hasBackend, backendProbed } from "./src/app/api.js";
+import { esc, icon, toast, download, fmtTime } from "./src/app/ui.js";
+import { validateContent } from "./src/content/index.js";
 
-const modules = [
-  {
-    id: "ch01",
-    index: "01",
-    title: "微调与部署",
-    stage: "基础",
-    summary: "完成大模型实践环境搭建，理解微调流程、模型加载、推理与部署的基本闭环。",
-    tags: ["Fine-tuning", "Deployment", "Environment"],
-    tutorial: `${REPO}/tree/main/documents/chapter1`,
-    scripts: `${REPO}/tree/main/documents/chapter1`,
-    tasks: [
-      ["检查 GPU、Python、CUDA 或 NPU 环境是否可用", "python --version"],
-      ["选择一个小模型完成本地推理 smoke test", "python -c \"print('model inference smoke test')\""],
-      ["记录微调数据格式、训练参数和部署方式", ""]
-    ]
-  },
-  {
-    id: "ch02",
-    index: "02",
-    title: "提示学习",
-    stage: "基础",
-    summary: "练习 few-shot、chain-of-thought、角色约束和结构化输出，形成可复用提示模板。",
-    tags: ["Prompt", "CoT", "Evaluation"],
-    tutorial: `${REPO}/tree/main/documents/chapter2`,
-    scripts: `${REPO}/tree/main/documents/chapter2`,
-    tasks: [
-      ["为同一任务设计 zero-shot、few-shot 和结构化 JSON 三种提示", ""],
-      ["用 10 个样例比较提示稳定性和失败模式", ""],
-      ["沉淀一个可复用提示模板到笔记区", ""]
-    ]
-  },
-  {
-    id: "ch03",
-    index: "03",
-    title: "知识编辑",
-    stage: "进阶",
-    summary: "理解模型内部知识更新、定位与编辑的基本思路，比较编辑前后的行为差异。",
-    tags: ["Knowledge Editing", "Model Behavior"],
-    tutorial: `${REPO}/tree/main/documents/chapter3`,
-    scripts: `${REPO}/tree/main/documents/chapter3`,
-    tasks: [
-      ["准备一个待编辑事实和一组泛化测试问题", ""],
-      ["记录编辑前后的回答差异", ""],
-      ["分析知识编辑是否引入无关行为变化", ""]
-    ]
-  },
-  {
-    id: "ch04",
-    index: "04",
-    title: "DeepSeekMath 数学推理",
-    stage: "进阶",
-    summary: "围绕数学推理任务实践数据构造、推理链路和结果评估。",
-    tags: ["Reasoning", "Math", "DeepSeekMath"],
-    tutorial: `${REPO}/tree/main/documents/chapter4`,
-    scripts: `${REPO}/tree/main/documents/chapter4`,
-    tasks: [
-      ["整理一组数学题并标注标准答案", ""],
-      ["比较直接回答和逐步推理的正确率", ""],
-      ["记录模型在哪类题型上最容易出错", ""]
-    ]
-  },
-  {
-    id: "ch05",
-    index: "05",
-    title: "多模态大模型",
-    stage: "应用",
-    summary: "实践图文理解、多模态输入组织和输出校验。",
-    tags: ["Multimodal", "Vision", "VLM"],
-    tutorial: `${REPO}/tree/main/documents/chapter5`,
-    scripts: `${REPO}/tree/main/documents/chapter5`,
-    tasks: [
-      ["准备 5 张测试图片并写出期望问题", ""],
-      ["比较模型对文字、物体和空间关系的识别能力", ""],
-      ["把失败案例整理到笔记区", ""]
-    ]
-  },
-  {
-    id: "ch06",
-    index: "06",
-    title: "多模态模型编辑",
-    stage: "进阶",
-    summary: "学习多模态模型的行为修正、编辑验证和跨输入泛化。",
-    tags: ["VLM Editing", "Robustness"],
-    tutorial: `${REPO}/tree/main/documents/chapter6`,
-    scripts: `${REPO}/tree/main/documents/chapter6`,
-    tasks: [
-      ["定义一个图文相关的错误知识点", ""],
-      ["设计编辑样本和保留样本", ""],
-      ["验证编辑是否影响原本正确的能力", ""]
-    ]
-  },
-  {
-    id: "ch07",
-    index: "07",
-    title: "大语言模型测试",
-    stage: "进阶",
-    summary: "建立测试集、指标和回归评估方式，让实验结果可复现。",
-    tags: ["Testing", "Benchmark", "Regression"],
-    tutorial: `${REPO}/tree/main/documents/chapter7`,
-    scripts: `${REPO}/tree/main/documents/chapter7`,
-    tasks: [
-      ["为一个任务建立最小测试集", ""],
-      ["定义准确性、格式合规、幻觉率等指标", ""],
-      ["记录一次 prompt 或模型变更后的回归结果", ""]
-    ]
-  },
-  {
-    id: "ch08",
-    index: "08",
-    title: "大模型水印",
-    stage: "安全",
-    summary: "理解文本水印、检测与鲁棒性问题，评估生成内容的可追踪性。",
-    tags: ["Watermark", "Detection", "Security"],
-    tutorial: `${REPO}/tree/main/documents/chapter8`,
-    scripts: `${REPO}/tree/main/documents/chapter8`,
-    tasks: [
-      ["阅读水印生成和检测流程", ""],
-      ["生成一组带水印与不带水印文本样例", ""],
-      ["测试改写、翻译、摘要对检测结果的影响", ""]
-    ]
-  },
-  {
-    id: "ch09",
-    index: "09",
-    title: "Data-Copilot",
-    stage: "应用",
-    summary: "实践数据处理智能助手，关注数据理解、清洗建议和自动化分析。",
-    tags: ["Data Agent", "Copilot", "Automation"],
-    tutorial: `${REPO}/tree/main/documents/chapter9`,
-    scripts: `${REPO}/tree/main/documents/chapter9`,
-    tasks: [
-      ["准备一个 CSV 或表格数据集", ""],
-      ["让模型生成清洗和分析计划", ""],
-      ["检查模型生成代码的正确性和风险", ""]
-    ]
-  },
-  {
-    id: "ch10",
-    index: "10",
-    title: "大模型 + GUI 智能体",
-    stage: "应用",
-    summary: "围绕 GUI Agent 练习任务分解、界面观察、操作规划和失败恢复。",
-    tags: ["GUI Agent", "Planning", "Tool Use"],
-    tutorial: `${REPO}/tree/main/documents/chapter10`,
-    scripts: `${REPO}/tree/main/documents/chapter10`,
-    tasks: [
-      ["定义一个可观察、可验证的 GUI 任务", ""],
-      ["拆分观察、计划、执行、校验四个环节", ""],
-      ["记录失败恢复策略和边界条件", ""]
-    ]
-  },
-  {
-    id: "ch11",
-    index: "11",
-    title: "大模型安全对齐",
-    stage: "安全",
-    summary: "学习安全对齐、红队测试、拒答策略和可用性之间的权衡。",
-    tags: ["Alignment", "Safety", "Red Team"],
-    tutorial: `${REPO}/tree/main/documents/chapter11`,
-    scripts: `${REPO}/tree/main/documents/chapter11`,
-    tasks: [
-      ["整理安全、合规和误拒三个维度的测试问题", ""],
-      ["比较不同系统提示对安全表现的影响", ""],
-      ["记录模型的高风险失败模式", ""]
-    ]
-  }
+import * as home from "./src/app/views/home.js";
+import * as diagnostic from "./src/app/views/diagnostic.js";
+import * as map from "./src/app/views/map.js";
+import * as routes from "./src/app/views/routes.js";
+import * as course from "./src/app/views/course.js";
+import * as labs from "./src/app/views/labs.js";
+import * as labPrompt from "./src/app/views/lab-prompt.js";
+import * as labRag from "./src/app/views/lab-rag.js";
+import * as labAgent from "./src/app/views/lab-agent.js";
+import * as labEmbodied from "./src/app/views/lab-embodied.js";
+import * as projects from "./src/app/views/projects.js";
+import * as library from "./src/app/views/library.js";
+import * as tutor from "./src/app/views/tutor.js";
+import * as quiz from "./src/app/views/quiz.js";
+import * as settings from "./src/app/views/settings.js";
+
+const root = document.querySelector("#app");
+let modeLabel = "检测后端中…";
+
+register("home", home);
+register("diagnostic", diagnostic);
+register("map", map);
+register("routes", routes);
+register("course", course);
+register("labs", labs);
+register("lab", { render: labRouter, bind: labBind });
+register("projects", projects);
+register("library", library);
+register("tutor", tutor);
+register("quiz", quiz);
+register("settings", settings);
+
+function labRouter(route) {
+  return { prompt: labPrompt, rag: labRag, agent: labAgent, embodied: labEmbodied }[route.id]?.render(route) || labs.render(route);
+}
+function labBind(route, el) {
+  const view = { prompt: labPrompt, rag: labRag, agent: labAgent, embodied: labEmbodied }[route.id];
+  if (view) view.bind(el);
+  else labs.bind(el);
+}
+
+const NAV = [
+  ["home", "home", "我的学习"],
+  ["routes", "map", "学习路线"],
+  ["labs", "lab", "实验室"],
+  ["projects", "project", "项目空间"],
+  ["library", "book", "资料与笔记"],
+  ["quiz", "check", "能力评价"],
 ];
 
-const ebooks = [
-  {
-    id: "repo-home",
-    title: "《动手学大模型》GitHub 项目",
-    type: "在线教程",
-    category: "项目",
-    desc: "章节资料、课件、教程和脚本入口。",
-    url: REPO
-  },
-  {
-    id: "repo-documents",
-    title: "动手学大模型资料目录",
-    type: "在线资料",
-    category: "资料",
-    desc: "按章节查看项目中的 documents 内容。",
-    url: `${REPO}/tree/main/documents`
-  },
-  {
-    id: "ascend-course",
-    title: "大模型开发全流程在线课程",
-    type: "课程",
-    category: "课程",
-    desc: "华为昇腾开发者课程入口，可与网页端笔记配合使用。",
-    url: COURSE
-  }
-];
-
-const defaultVideos = [
-  {
-    title: "大模型开发全流程",
-    type: "外部课程",
-    url: COURSE,
-    desc: "从开发到部署的完整课程入口。"
-  },
-  {
-    title: "Dive into LLMs 配套资料",
-    type: "资料入口",
-    url: REPO,
-    desc: "打开项目后可按章节进入课件和脚本。"
-  }
-];
-
-const state = loadState();
-let currentView = "dashboard";
-let currentReaderUrl = null;
-let currentVideoUrl = null;
-
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => Array.from(document.querySelectorAll(selector));
-
-function defaultState() {
-  return {
-    activeModule: modules[0].id,
-    progress: Object.fromEntries(modules.map((item) => [item.id, { read: false, practice: false, video: false }])),
-    notes: {},
-    practiceLogs: {},
-    favorites: [],
-    videos: []
-  };
+function shell(body) {
+  const route = currentRoute();
+  const crumbs = { home: "我的学习", diagnostic: "起点诊断", map: "学习地图", routes: "学习路线", course: "课程学习", labs: "实验室", lab: "实验工作台", projects: "项目空间", library: "资料与笔记", tutor: "AI 助教", quiz: "能力评价", settings: "设置" };
+  const active = (p) => route.page === p || (p === "routes" && route.page === "course") || (p === "labs" && route.page === "lab");
+  return `<div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#home"><span class="brand-symbol">a<span>i</span></span><span>AI Learning<small>学习实验室</small></span></a>
+      <div class="nav-label">WORKSPACE</div>
+      <nav aria-label="主导航">${NAV.map(([p, i, t]) => `<button data-page="${p}" class="nav-item ${active(p) ? "active" : ""}" ${route.page === p ? 'aria-current="page"' : ""}>${icon(i)}<span>${t}</span></button>`).join("")}</nav>
+      <div class="sidebar-bottom">
+        <div class="mode-indicator" id="mode-indicator" title="${hasBackend() ? "本地后端已连接：真实模型、embedding 与训练实验可用" : "纯静态模式：本地数据与规则实验可用"}">
+          <span class="status-dot ${hasBackend() ? "ok" : ""}"></span><span>${esc(modeLabel)}</span>
+        </div>
+        <p>笔记与实验保存在此浏览器<br>定期备份，让积累留得住。</p>
+        <button class="text-button" data-action="backup">导出学习备份 ${icon("arrow")}</button>
+        <button class="text-button" data-page="settings">导入备份 ${icon("arrow")}</button>
+        <button class="text-button" data-page="settings">账户与同步 ${icon("arrow")}</button>
+      </div>
+    </aside>
+    <div class="main-shell">
+      <header class="topbar">
+        <div class="breadcrumb">学习空间 <span>/</span> ${esc(crumbs[route.page] || route.page)}</div>
+        <div class="top-meta"><span class="status-dot"></span><span id="save-status">保存在此浏览器</span><button class="avatar" data-page="settings" aria-label="打开设置">学</button></div>
+      </header>
+      <main id="main" tabindex="-1">${body}</main>
+      <footer>AI LEARNING LAB <span>理解 · 实现 · 诊断 · 验证</span><span>完整版 3.0 · ${hasBackend() ? "完整模式" : "本地模式"}</span></footer>
+    </div>
+  </div>`;
 }
 
-function loadState() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
-    return mergeState(defaultState(), parsed || {});
-  } catch {
-    return defaultState();
-  }
-}
-
-function mergeState(base, saved) {
-  const merged = { ...base, ...saved };
-  merged.progress = { ...base.progress, ...(saved.progress || {}) };
-  merged.notes = { ...(saved.notes || {}) };
-  merged.practiceLogs = { ...(saved.practiceLogs || {}) };
-  merged.favorites = Array.isArray(saved.favorites) ? saved.favorites : [];
-  merged.videos = Array.isArray(saved.videos) ? saved.videos : [];
-  if (!modules.some((item) => item.id === merged.activeModule)) merged.activeModule = modules[0].id;
-  return merged;
-}
-
-function saveState() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(state));
-  renderStats();
-  renderQuickGrid();
-  renderWorkspaceLinks();
-  renderStageRoadmap();
-  renderAchievements();
-  renderGlobalSearch();
-  renderNoteList();
-}
-
-function moduleById(id) {
-  return modules.find((item) => item.id === id) || modules[0];
-}
-
-function setView(view) {
-  currentView = view;
-  $$(".view").forEach((el) => el.classList.toggle("active", el.id === `${view}-view`));
-  $$(".nav-button").forEach((el) => el.classList.toggle("active", el.dataset.view === view));
-  const titles = {
-    dashboard: "总览",
-    curriculum: "学习路线",
-    practice: "实践实验",
-    library: "电子书",
-    videos: "课程视频",
-    notes: "学习笔记"
-  };
-  $("#view-title").textContent = titles[view];
-  if (view === "dashboard") drawMap();
-}
-
-function renderStats() {
-  const totalChecks = modules.length * 3;
-  const finishedChecks = modules.reduce((sum, item) => {
-    const progress = state.progress[item.id] || {};
-    return sum + Number(progress.read) + Number(progress.practice) + Number(progress.video);
-  }, 0);
-  const read = modules.filter((item) => state.progress[item.id]?.read).length;
-  const practice = modules.filter((item) => state.progress[item.id]?.practice).length;
-  const notes = Object.values(state.notes).filter((note) => note?.body?.trim()).length;
-  const percent = Math.round((finishedChecks / totalChecks) * 100);
-  $("#stat-progress").textContent = `${percent}%`;
-  $("#dashboard-progress-ring")?.style.setProperty("--progress", `${percent}%`);
-  $("#stat-read").textContent = `${read} / ${modules.length}`;
-  $("#stat-practice").textContent = `${practice} / ${modules.length}`;
-  $("#stat-notes").textContent = String(notes);
-
-  const next = modules.find((item) => !state.progress[item.id]?.practice) || modules[0];
-  $("#next-title").textContent = `${next.index}. ${next.title}`;
-  $("#stat-stage").textContent = next.stage;
-}
-
-function renderQuickGrid() {
-  const target = $("#quick-grid");
-  target.innerHTML = "";
-  const next = modules.find((item) => !state.progress[item.id]?.practice) || moduleById(state.activeModule);
-  const cards = [
-    {
-      label: "Next",
-      title: "继续当前模块",
-      text: `${next.title}: ${next.summary}`,
-      action: "打开实践",
-      onClick: () => {
-        state.activeModule = next.id;
-        $("#practice-module").value = next.id;
-        renderPractice();
-        setView("practice");
-      }
-    },
-    {
-      label: "Focus",
-      title: "今日任务",
-      text: buildTodayTask(next),
-      action: "查看路线",
-      onClick: () => setView("curriculum")
-    },
-    {
-      label: "Review",
-      title: "整理知识库",
-      text: latestNoteSummary(),
-      action: "打开笔记",
-      onClick: () => setView("notes")
-    },
-    {
-      label: "Library",
-      title: "资料工作台",
-      text: "进入资料、课程视频和本机 PDF 预览入口，把学习材料集中处理。",
-      action: "打开书库",
-      onClick: () => setView("library")
-    }
-  ];
-
-  cards.forEach((card) => {
-    const el = document.createElement("article");
-    el.className = "module-card";
-    el.innerHTML = `<div class="card-head"><span class="stage-pill"></span></div><h3></h3><p></p><div class="card-actions"></div>`;
-    el.querySelector(".stage-pill").textContent = card.label;
-    el.querySelector("h3").textContent = card.title;
-    el.querySelector("p").textContent = card.text;
-    const button = document.createElement("button");
-    button.className = "primary-button";
-    button.textContent = card.action;
-    button.addEventListener("click", card.onClick);
-    el.querySelector(".card-actions").append(button);
-    target.append(el);
-  });
-}
-
-function buildTodayTask(item) {
-  const progress = state.progress[item.id] || {};
-  if (!progress.read) return `先完成 ${item.title} 的教程阅读，再记录 3 个关键词。`;
-  if (!progress.practice) return `完成 ${item.title} 的实践任务，并把参数、输出和问题写入实验记录。`;
-  if (!progress.video) return `补看 ${item.title} 相关课程或资料视频，记录一个可复用结论。`;
-  return "选择下一个还没完成的模块，保持阅读、实践、笔记同步推进。";
-}
-
-function latestNoteSummary() {
-  const notes = Object.entries(state.notes)
-    .filter(([, note]) => note?.body?.trim())
-    .slice(-1)
-    .map(([id, note]) => ({ ...note, module: moduleById(id) }));
-  if (!notes.length) return "还没有沉淀笔记，先把当前模块的概念、代码和实验结论写下来。";
-  return `${notes[0].module.title}: ${notes[0].title || "未命名笔记"}，更新于 ${notes[0].updated || "最近"}`;
-}
-
-function renderWorkspaceLinks() {
-  const target = $("#workspace-links");
-  if (!target) return;
-  target.innerHTML = "";
-  const practiceLogs = Object.values(state.practiceLogs).filter((log) => log?.trim()).length;
-  const noteCount = Object.values(state.notes).filter((note) => note?.body?.trim()).length;
-  const items = [
-    { icon: "▦", title: "学习路线", text: `${modules.length} 个模块`, view: "curriculum" },
-    { icon: "⌘", title: "实践记录", text: `${practiceLogs} 条实验复盘`, view: "practice" },
-    { icon: "▤", title: "资料书库", text: `${getLibraryResources().length} 个资源入口`, view: "library" },
-    { icon: "▶", title: "课程视频", text: `${defaultVideos.length + state.videos.length} 个视频入口`, view: "videos" },
-    { icon: "✎", title: "学习笔记", text: `${noteCount} 篇已保存`, view: "notes" }
-  ];
-
-  items.forEach((item) => {
-    const button = document.createElement("button");
-    button.className = "workspace-link";
-    button.innerHTML = `<span class="workspace-icon" aria-hidden="true"></span><span><strong></strong><span></span></span><em>→</em>`;
-    button.querySelector(".workspace-icon").textContent = item.icon;
-    button.querySelector("strong").textContent = item.title;
-    button.querySelector("span span").textContent = item.text;
-    button.addEventListener("click", () => setView(item.view));
-    target.append(button);
-  });
-}
-
-function renderStageRoadmap() {
-  const target = $("#stage-roadmap");
-  if (!target) return;
-  target.innerHTML = "";
-  ["基础", "进阶", "应用", "安全"].forEach((stage) => {
-    const stageModules = modules.filter((item) => item.stage === stage);
-    const checks = stageModules.length * 3;
-    const done = stageModules.reduce((sum, item) => {
-      const progress = state.progress[item.id] || {};
-      return sum + Number(progress.read) + Number(progress.practice) + Number(progress.video);
-    }, 0);
-    const percent = checks ? Math.round((done / checks) * 100) : 0;
-    const card = document.createElement("article");
-    card.className = "stage-card";
-    card.innerHTML = `<header><h3></h3><span class="stage-pill"></span></header><div class="stage-progress"><span></span></div><p></p>`;
-    card.querySelector("h3").textContent = stage;
-    card.querySelector(".stage-pill").textContent = `${percent}%`;
-    card.querySelector(".stage-progress span").style.width = `${percent}%`;
-    card.querySelector("p").textContent = `${stageModules.length} 个模块，已完成 ${done} / ${checks} 个学习动作`;
-    target.append(card);
-  });
-}
-
-function getLibraryResources() {
-  const chapterResources = modules.map((item) => ({
-    id: `chapter-${item.id}`,
-    title: `${item.index}. ${item.title}`,
-    type: "章节教程",
-    category: item.stage,
-    tags: item.tags,
-    desc: item.summary,
-    url: item.tutorial
-  }));
-  return [...ebooks, ...chapterResources];
-}
-
-function renderAchievements() {
-  const target = $("#achievement-grid");
-  if (!target) return;
-  target.innerHTML = "";
-  const read = modules.filter((item) => state.progress[item.id]?.read).length;
-  const practice = modules.filter((item) => state.progress[item.id]?.practice).length;
-  const video = modules.filter((item) => state.progress[item.id]?.video).length;
-  const notes = Object.values(state.notes).filter((note) => note?.body?.trim()).length;
-  const favoriteCount = state.favorites.length;
-  const allDone = modules.every((item) => {
-    const progress = state.progress[item.id] || {};
-    return progress.read && progress.practice && progress.video;
-  });
-  const achievements = [
-    { icon: "01", title: "启航", desc: "完成任意一个阅读动作", unlocked: read >= 1 },
-    { icon: "XP", title: "动手派", desc: "完成 3 个实践模块", unlocked: practice >= 3 },
-    { icon: "KB", title: "知识整理者", desc: "保存 5 篇学习笔记", unlocked: notes >= 5 },
-    { icon: "★", title: "资料策展人", desc: "收藏 5 个学习资源", unlocked: favoriteCount >= 5 },
-    { icon: "▶", title: "课程跟学者", desc: "完成 3 个视频学习动作", unlocked: video >= 3 },
-    { icon: "AI", title: "大模型通关", desc: "完成所有阅读、实践和视频动作", unlocked: allDone }
-  ];
-
-  achievements.forEach((item) => {
-    const card = document.createElement("article");
-    card.className = `achievement-card ${item.unlocked ? "" : "locked"}`;
-    card.innerHTML = `<div class="achievement-badge"></div><div><h3></h3><p></p></div>`;
-    card.querySelector(".achievement-badge").textContent = item.unlocked ? item.icon : "–";
-    card.querySelector("h3").textContent = item.title;
-    card.querySelector("p").textContent = item.desc;
-    target.append(card);
-  });
-}
-
-function renderGlobalSearch() {
-  const input = $("#global-search");
-  const target = $("#search-results");
-  if (!input || !target) return;
-  const keyword = input.value.trim().toLowerCase();
-  target.innerHTML = "";
-  target.classList.toggle("active", Boolean(keyword));
-  if (!keyword) return;
-
-  const moduleResults = modules
-    .filter((item) => `${item.title} ${item.summary} ${item.tags.join(" ")}`.toLowerCase().includes(keyword))
-    .map((item) => ({
-      label: "章节",
-      title: item.title,
-      text: item.summary,
-      action: "打开实践",
-      onClick: () => {
-        state.activeModule = item.id;
-        $("#practice-module").value = item.id;
-        renderPractice();
-        saveState();
-        setView("practice");
-      }
-    }));
-
-  const noteResults = Object.entries(state.notes)
-    .filter(([, note]) => `${note.title || ""} ${note.tags || ""} ${note.body || ""}`.toLowerCase().includes(keyword))
-    .map(([id, note]) => ({
-      label: "笔记",
-      title: note.title || `${moduleById(id).title} 学习笔记`,
-      text: `${moduleById(id).title} · ${note.tags || "未设置标签"}`,
-      action: "打开笔记",
-      onClick: () => {
-        $("#note-module").value = id;
-        renderNoteEditor();
-        setView("notes");
-      }
-    }));
-
-  const resourceResults = [...getLibraryResources(), ...defaultVideos, ...state.videos]
-    .filter((item) => `${item.title} ${item.desc || ""} ${item.url || ""}`.toLowerCase().includes(keyword))
-    .map((item) => ({
-      label: item.type || "资源",
-      title: item.title,
-      text: item.desc || item.url,
-      action: "打开链接",
-      onClick: () => window.open(item.url, "_blank", "noreferrer")
-    }));
-
-  [...moduleResults, ...noteResults, ...resourceResults].slice(0, 8).forEach((item) => {
-    const result = document.createElement("article");
-    result.className = "search-result";
-    result.innerHTML = `<span class="stage-pill"></span><strong></strong><p class="muted"></p>`;
-    result.querySelector(".stage-pill").textContent = item.label;
-    result.querySelector("strong").textContent = item.title;
-    result.querySelector("p").textContent = item.text;
-    const button = document.createElement("button");
-    button.className = "secondary-button";
-    button.textContent = item.action;
-    button.addEventListener("click", item.onClick);
-    result.append(button);
-    target.append(result);
-  });
-
-  if (!target.children.length) {
-    const empty = document.createElement("article");
-    empty.className = "search-result";
-    empty.innerHTML = `<span class="stage-pill">搜索</span><strong>没有匹配结果</strong><p class="muted">换一个关键词试试，例如“微调”“安全”“笔记”。</p>`;
-    target.append(empty);
-  }
-}
-
-function renderModules() {
-  const search = $("#module-search").value.trim().toLowerCase();
-  const stage = $("#stage-filter").value;
-  const target = $("#module-grid");
-  const template = $("#module-card-template");
-  target.innerHTML = "";
-
-  modules
-    .filter((item) => stage === "all" || item.stage === stage)
-    .filter((item) => {
-      const haystack = `${item.title} ${item.summary} ${item.tags.join(" ")}`.toLowerCase();
-      return !search || haystack.includes(search);
-    })
-    .forEach((item) => {
-      const card = template.content.firstElementChild.cloneNode(true);
-      card.querySelector(".stage-pill").textContent = item.stage;
-      card.querySelector(".module-index").textContent = item.index;
-      card.querySelector("h3").textContent = item.title;
-      card.querySelector("p").textContent = item.summary;
-      const tagRow = card.querySelector(".tag-row");
-      item.tags.forEach((tag) => {
-        const span = document.createElement("span");
-        span.className = "tag";
-        span.textContent = tag;
-        tagRow.append(span);
+function render() {
+  const route = currentRoute();
+  const view = { home, diagnostic, map, routes, course, labs, lab: { render: labRouter, bind: labBind }, projects, library, tutor, quiz, settings }[route.page] || home;
+  root.innerHTML = shell(view.render(route));
+  // 视图自行绑定交互
+  const bindTarget = { home, diagnostic, map, routes, course, labs, projects, library, tutor, quiz, settings }[route.page];
+  if (bindTarget?.bind) bindTarget.bind(root, () => {
+    const results = root.querySelector("#course-results");
+    if (results) {
+      results.innerHTML = routes.courseResults();
+      routes.bind(root, () => {
+        results.innerHTML = routes.courseResults();
+        routes.bind(root, () => {});
       });
-      card.querySelectorAll("input[type='checkbox']").forEach((input) => {
-        input.checked = Boolean(state.progress[item.id]?.[input.dataset.field]);
-        input.addEventListener("change", () => {
-          state.progress[item.id][input.dataset.field] = input.checked;
-          saveState();
-          renderModules();
-        });
-      });
-      const actions = card.querySelector(".card-actions");
-      actions.append(linkButton("教程", item.tutorial));
-      actions.append(linkButton("脚本", item.scripts));
-      const start = document.createElement("button");
-      start.className = "primary-button";
-      start.textContent = "开始";
-      start.addEventListener("click", () => {
-        state.activeModule = item.id;
-        $("#practice-module").value = item.id;
-        $("#note-module").value = item.id;
-        renderPractice();
-        renderNoteEditor();
-        saveState();
-        setView("practice");
-      });
-      actions.append(start);
-      target.append(card);
-    });
-}
-
-function linkButton(text, href) {
-  const a = document.createElement("a");
-  a.className = "link-button";
-  a.href = href;
-  a.target = "_blank";
-  a.rel = "noreferrer";
-  a.textContent = text;
-  return a;
-}
-
-function populateSelects() {
-  [$("#practice-module"), $("#note-module")].forEach((select) => {
-    select.innerHTML = "";
-    modules.forEach((item) => {
-      const option = document.createElement("option");
-      option.value = item.id;
-      option.textContent = `${item.index}. ${item.title}`;
-      select.append(option);
-    });
-    select.value = state.activeModule;
-  });
-}
-
-function renderPractice() {
-  const id = $("#practice-module").value || state.activeModule;
-  const item = moduleById(id);
-  state.activeModule = id;
-  $("#practice-module-title").textContent = item.title;
-  $("#practice-summary").textContent = item.summary;
-  $("#practice-log").value = state.practiceLogs[id] || "";
-  const target = $("#task-list");
-  target.innerHTML = "";
-
-  item.tasks.forEach(([title, command], index) => {
-    const task = document.createElement("div");
-    task.className = "task-item";
-    const heading = document.createElement("strong");
-    heading.textContent = `${index + 1}. ${title}`;
-    task.append(heading);
-    if (command) {
-      const code = document.createElement("code");
-      code.textContent = command;
-      const copy = document.createElement("button");
-      copy.className = "copy-button";
-      copy.textContent = "复制命令";
-      copy.addEventListener("click", () => copyText(command, copy));
-      task.append(code, copy);
     }
-    target.append(task);
   });
+  if (route.page === "lab") labBind(route, root);
+  document.title = `${crumb(route.page)} · AI Learning 学习实验室`;
 }
 
-function renderLibrary() {
-  const target = $("#ebook-list");
-  const stats = $("#library-stats");
-  target.innerHTML = "";
-  const query = $("#resource-search")?.value.trim().toLowerCase() || "";
-  const type = $("#resource-type-filter")?.value || "all";
-  const favoriteOnly = Boolean($("#favorite-only")?.checked);
-  const resources = getLibraryResources();
-  const filtered = resources
-    .filter((item) => type === "all" || item.type === type)
-    .filter((item) => !favoriteOnly || state.favorites.includes(item.id))
-    .filter((item) => {
-      const haystack = `${item.title} ${item.type} ${item.category || ""} ${item.desc || ""} ${(item.tags || []).join(" ")}`.toLowerCase();
-      return !query || haystack.includes(query);
-    });
+const crumb = (p) =>
+  ({ home: "我的学习", diagnostic: "起点诊断", map: "学习地图", routes: "学习路线", course: "课程学习", labs: "实验室", lab: "实验工作台", projects: "项目空间", library: "资料与笔记", tutor: "AI 助教", quiz: "能力评价", settings: "设置" }[p] || "学习空间");
 
-  if (stats) {
-    const favoriteCount = state.favorites.length;
-    stats.innerHTML = "";
-    [
-      ["资源总数", resources.length],
-      ["已收藏", favoriteCount],
-      ["当前筛选", filtered.length]
-    ].forEach(([label, value]) => {
-      const item = document.createElement("div");
-      item.className = "library-stat";
-      item.innerHTML = `<span></span><strong></strong>`;
-      item.querySelector("span").textContent = label;
-      item.querySelector("strong").textContent = value;
-      stats.append(item);
-    });
-  }
+const rerender = render;
+export { rerender };
 
-  filtered.forEach((item) => {
-    const row = document.createElement("article");
-    const isFavorite = state.favorites.includes(item.id);
-    row.className = `resource-item ${isFavorite ? "favorite" : ""}`;
-    row.innerHTML = `<div class="resource-meta"></div><strong></strong><p class="muted"></p><div class="resource-actions"></div>`;
-    const meta = row.querySelector(".resource-meta");
-    const typePill = document.createElement("span");
-    typePill.className = "stage-pill";
-    typePill.textContent = item.type;
-    meta.append(typePill);
-    if (item.category) {
-      const category = document.createElement("span");
-      category.className = "tag";
-      category.textContent = item.category;
-      meta.append(category);
-    }
-    (item.tags || []).slice(0, 2).forEach((tag) => {
-      const tagEl = document.createElement("span");
-      tagEl.className = "tag";
-      tagEl.textContent = tag;
-      meta.append(tagEl);
-    });
-    row.querySelector("strong").textContent = item.title;
-    row.querySelector("p").textContent = item.desc;
-    const actions = row.querySelector(".resource-actions");
-    actions.append(linkButton("打开", item.url));
-    const favorite = document.createElement("button");
-    favorite.className = "secondary-button";
-    favorite.textContent = isFavorite ? "取消收藏" : "收藏";
-    favorite.addEventListener("click", () => toggleFavorite(item.id));
-    actions.append(favorite);
-    target.append(row);
-  });
-
-  if (!filtered.length) {
-    const empty = document.createElement("article");
-    empty.className = "resource-item";
-    empty.innerHTML = `<span class="stage-pill">资料库</span><strong>没有匹配资源</strong><p class="muted">调整关键词、类型或取消“只看收藏”。</p>`;
-    target.append(empty);
-  }
-}
-
-function toggleFavorite(id) {
-  if (state.favorites.includes(id)) {
-    state.favorites = state.favorites.filter((item) => item !== id);
-  } else {
-    state.favorites.push(id);
-  }
-  saveState();
-  renderLibrary();
-  renderAchievements();
-}
-
-function renderVideos() {
-  const target = $("#video-list");
-  target.innerHTML = "";
-  [...defaultVideos, ...state.videos].forEach((item, index) => {
-    const row = document.createElement("article");
-    row.className = "resource-item";
-    row.innerHTML = `<span class="stage-pill"></span><strong></strong><p class="muted"></p><div class="resource-actions"></div>`;
-    row.querySelector(".stage-pill").textContent = item.type || "自定义";
-    row.querySelector("strong").textContent = item.title;
-    row.querySelector("p").textContent = item.desc || item.url;
-    const actions = row.querySelector(".resource-actions");
-    actions.append(linkButton("打开链接", item.url));
-    if (item.url.match(/\.(mp4|webm|ogg)(\?.*)?$/i)) {
-      const play = document.createElement("button");
-      play.className = "secondary-button";
-      play.textContent = "播放";
-      play.addEventListener("click", () => playVideo(item.url));
-      actions.append(play);
-    }
-    if (index >= defaultVideos.length) {
-      const remove = document.createElement("button");
-      remove.className = "secondary-button";
-      remove.textContent = "删除";
-      remove.addEventListener("click", () => {
-        state.videos.splice(index - defaultVideos.length, 1);
-        saveState();
-        renderVideos();
-      });
-      actions.append(remove);
-    }
-    target.append(row);
-  });
-}
-
-function renderNoteList() {
-  const target = $("#note-list");
-  target.innerHTML = "";
-  modules.forEach((item) => {
-    const note = state.notes[item.id];
-    const button = document.createElement("button");
-    button.className = `note-item ${item.id === $("#note-module")?.value ? "active" : ""}`;
-    button.innerHTML = `<strong></strong><span class="muted"></span>`;
-    button.querySelector("strong").textContent = `${item.index}. ${item.title}`;
-    button.querySelector("span").textContent = note?.updated ? `更新于 ${note.updated}` : "尚未记录";
-    button.addEventListener("click", () => {
-      $("#note-module").value = item.id;
-      state.activeModule = item.id;
-      renderNoteEditor();
-      renderNoteList();
-      saveState();
-    });
-    target.append(button);
-  });
-}
-
-function renderNoteEditor() {
-  const id = $("#note-module").value || state.activeModule;
-  const item = moduleById(id);
-  const note = state.notes[id] || {};
-  state.activeModule = id;
-  $("#note-title").value = note.title || `${item.title} 学习笔记`;
-  $("#note-tags").value = note.tags || item.tags.join(", ");
-  $("#note-body").value = note.body || "";
-}
-
-function saveNote() {
-  const id = $("#note-module").value;
-  state.notes[id] = {
-    title: $("#note-title").value.trim(),
-    tags: $("#note-tags").value.trim(),
-    body: $("#note-body").value,
-    updated: new Date().toLocaleString("zh-CN", { hour12: false })
-  };
-  saveState();
-  renderNoteList();
-}
-
-function downloadNote() {
-  const id = $("#note-module").value;
-  const item = moduleById(id);
-  const title = $("#note-title").value.trim() || `${item.title} 学习笔记`;
-  const tags = $("#note-tags").value.trim();
-  const body = $("#note-body").value;
-  const markdown = `# ${title}\n\n模块：${item.index}. ${item.title}\n\n标签：${tags}\n\n${body}\n`;
-  downloadBlob(markdown, `${item.index}-${item.title}-note.md`, "text/markdown;charset=utf-8");
-}
-
-function copyText(text, button) {
-  const reset = () => setTimeout(() => (button.textContent = "复制命令"), 1200);
-  const task = navigator.clipboard?.writeText?.(text);
-  if (!task) {
-    button.textContent = "手动复制";
-    reset();
+// ---------- 全局事件 ----------
+root.addEventListener("click", (e) => {
+  const el = e.target.closest("button,[data-page]");
+  if (!el) return;
+  if (el.dataset.page) {
+    go(el.dataset.page, el.dataset.context || "", el.dataset.extra || "");
     return;
   }
-  task.then(
-    () => {
-      button.textContent = "已复制";
-      reset();
-    },
-    () => {
-      button.textContent = "复制失败";
-      reset();
-    }
-  );
-}
-
-function openPdf(file) {
-  if (currentReaderUrl) URL.revokeObjectURL(currentReaderUrl);
-  currentReaderUrl = URL.createObjectURL(file);
-  $("#pdf-reader").src = currentReaderUrl;
-  $("#pdf-reader").style.display = "block";
-  $("#reader-empty").style.display = "none";
-}
-
-function playVideo(url) {
-  if (currentVideoUrl?.startsWith("blob:")) URL.revokeObjectURL(currentVideoUrl);
-  currentVideoUrl = url;
-  $("#video-player").src = url;
-  $("#video-player").style.display = "block";
-  $("#video-empty").style.display = "none";
-  $("#video-player").play().catch(() => {});
-}
-
-function exportData() {
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    source: REPO,
-    state
-  };
-  downloadBlob(JSON.stringify(payload, null, 2), "ai-learning-data.json", "application/json;charset=utf-8");
-}
-
-function downloadBlob(content, filename, type) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename.replace(/[\\/:*?"<>|]/g, "-");
-  document.body.append(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function importData(file) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const data = JSON.parse(String(reader.result));
-      const imported = data.state || data;
-      Object.assign(state, mergeState(defaultState(), imported));
-      saveState();
-      populateSelects();
-      renderAll();
-    } catch {
-      alert("导入失败：文件不是有效的学习数据 JSON。");
-    }
-  };
-  reader.readAsText(file);
-}
-
-function drawMap() {
-  const canvas = $("#map-canvas");
-  if (!canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(320, Math.floor(rect.width * dpr));
-  canvas.height = Math.max(260, Math.floor(rect.height * dpr));
-  const ctx = canvas.getContext("2d");
-  ctx.scale(dpr, dpr);
-  const width = rect.width;
-  const height = rect.height;
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#eaf1f8";
-  ctx.fillRect(0, 0, width, height);
-
-  ctx.strokeStyle = "#c6d4e4";
-  ctx.lineWidth = 1;
-  for (let x = 28; x < width; x += 48) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x + height * 0.35, height);
-    ctx.stroke();
+  if (el.dataset.course) {
+    go("course", el.dataset.course, el.dataset.step || "0");
+    return;
   }
+  if (el.dataset.lab) {
+    go("lab", el.dataset.lab);
+    return;
+  }
+  if (el.dataset.action === "backup") {
+    S.exportAll();
+    download(S.exportAll(), "ai-learning-backup.json", "application/json");
+    toast("备份已导出，包含笔记、实验、归档与旧版原始数据。");
+    return;
+  }
+});
 
-  const points = [
-    [0.11, 0.28, "基础"],
-    [0.3, 0.38, "提示"],
-    [0.47, 0.24, "推理"],
-    [0.62, 0.43, "多模态"],
-    [0.78, 0.31, "智能体"],
-    [0.9, 0.52, "安全"]
-  ].map(([x, y, label]) => ({ x: width * x, y: height * y, label }));
+root.addEventListener("change", (e) => {
+  const el = e.target;
+  if (el.id === "goal") {
+    S.setGoal(el.value);
+    toast("学习方向已更新，课程和记录都会保留。");
+    render();
+  }
+});
 
-  ctx.strokeStyle = "#2868c7";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  points.forEach((point, index) => {
-    if (index === 0) ctx.moveTo(point.x, point.y);
-    else ctx.lineTo(point.x, point.y);
-  });
-  ctx.stroke();
+// 键盘可达性：g + 首字母导航略；保证焦点顺序即可。
 
-  points.forEach((point, index) => {
-    ctx.fillStyle = ["#2868c7", "#147c72", "#247a3d", "#9a5b00", "#6b5fb5", "#b43a3a"][index];
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, 15, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "700 12px Microsoft YaHei, Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(String(index + 1), point.x, point.y);
-    ctx.fillStyle = "#17202a";
-    ctx.font = "700 14px Microsoft YaHei, Arial";
-    ctx.fillText(point.label, point.x, point.y + 34);
-  });
+async function boot() {
+  try {
+    const problems = validateContent();
+    if (!problems.ok) console.error("内容一致性错误：", problems.problems);
+    S.init();
+    const state = S.getState();
+    if (state.settings?.reducedMotion) document.documentElement.classList.add("reduced-motion");
+    initRouter();
+    render();
+    S.subscribe(() => render());
+    window.addEventListener("hashchange", render);
+    // 后端探测（异步，完成后更新模式指示与页面）
+    const health = await probe();
+    modeLabel = health.ok
+      ? `完整模式 · ${health.providers.filter((p) => p.configured).length} 个模型已配置`
+      : "本地模式（未检测到后端）";
+    render();
+  } catch (error) {
+    console.error("启动失败：", error);
+    root.innerHTML = `<div class="error-box" role="alert"><strong>启动失败</strong><pre>${String(error?.stack || error)}</pre></div>`;
+    toast(`启动失败：${error?.message || error}`);
+  }
 }
 
-function bindEvents() {
-  $$(".nav-button").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
-  $$("[data-jump-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.jumpView)));
-  $("#global-search")?.addEventListener("input", renderGlobalSearch);
-  $("#clear-global-search")?.addEventListener("click", () => {
-    $("#global-search").value = "";
-    renderGlobalSearch();
-  });
-  $("#module-search").addEventListener("input", renderModules);
-  $("#stage-filter").addEventListener("change", renderModules);
-  $("#resource-search")?.addEventListener("input", renderLibrary);
-  $("#resource-type-filter")?.addEventListener("change", renderLibrary);
-  $("#favorite-only")?.addEventListener("change", renderLibrary);
-  $("#practice-module").addEventListener("change", () => {
-    state.activeModule = $("#practice-module").value;
-    renderPractice();
-    saveState();
-  });
-  $("#mark-practice").addEventListener("click", () => {
-    const id = $("#practice-module").value;
-    state.progress[id].practice = true;
-    saveState();
-    renderModules();
-  });
-  $("#save-practice-log").addEventListener("click", () => {
-    state.practiceLogs[$("#practice-module").value] = $("#practice-log").value;
-    saveState();
-  });
-  $("#ebook-file").addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (file) openPdf(file);
-  });
-  $("#video-file").addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (file) playVideo(URL.createObjectURL(file));
-  });
-  $("#video-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const title = $("#video-title-input").value.trim();
-    const url = $("#video-url-input").value.trim();
-    if (!title || !url) return;
-    state.videos.push({ title, url, type: "自定义链接", desc: url });
-    $("#video-title-input").value = "";
-    $("#video-url-input").value = "";
-    saveState();
-    renderVideos();
-  });
-  $("#note-module").addEventListener("change", () => {
-    state.activeModule = $("#note-module").value;
-    renderNoteEditor();
-    renderNoteList();
-    saveState();
-  });
-  $("#save-note").addEventListener("click", saveNote);
-  $("#download-note").addEventListener("click", downloadNote);
-  $("#export-data").addEventListener("click", exportData);
-  $("#import-data").addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (file) importData(file);
-  });
-  $("#continue-learning").addEventListener("click", () => {
-    const next = modules.find((item) => !state.progress[item.id]?.practice) || moduleById(state.activeModule);
-    state.activeModule = next.id;
-    $("#practice-module").value = next.id;
-    renderPractice();
-    saveState();
-    setView("practice");
-  });
-  window.addEventListener("resize", () => {
-    if (currentView === "dashboard") drawMap();
-  });
-}
+boot();
 
-function renderAll() {
-  renderStats();
-  renderQuickGrid();
-  renderWorkspaceLinks();
-  renderStageRoadmap();
-  renderAchievements();
-  renderGlobalSearch();
-  renderModules();
-  renderPractice();
-  renderLibrary();
-  renderVideos();
-  renderNoteEditor();
-  renderNoteList();
-  drawMap();
-}
-
-populateSelects();
-bindEvents();
-renderAll();
-
-if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js").catch(() => {});
-  });
-}
+// 退役旧 service worker（避免旧缓存遮蔽修复）。
+if ("serviceWorker" in navigator)
+  navigator.serviceWorker
+    .getRegistrations()
+    .then((rs) =>
+      rs
+        .filter((r) => r.scope === new URL("./", location.href).href)
+        .forEach((r) => r.unregister()),
+    )
+    .catch(() => {});
