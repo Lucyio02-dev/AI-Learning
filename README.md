@@ -2,6 +2,8 @@
 
 面向大学生与自学者的大模型、具身智能学习工作台：理解原理、运行真实实验、定位失败环节、验证修改。
 
+**后续开发入口**：[AI 接续开发清单（3.1 之后）](./docs/AI_HANDOFF_NEXT.md)，包含优先级、源码问题、任务依赖和验收标准。
+
 **在线入口**：[GitHub Pages 学习工作台](https://lucyio02-dev.github.io/AI-Learning/)。3.1 在 3.0 工作台上整合课程案例、数据修复与在线发布，沿用 v3 学习数据。整合范围、版本关系和剩余工作见 [版本整合记录](./docs/VERSION_INTEGRATION.md)。两条主线（大模型 / 具身智能）的已有验收证据见 [docs/ACCEPTANCE.md](./docs/ACCEPTANCE.md)；仍未完成的范围继续保留在 [交接清单](./docs/GLM_HANDOFF_CHECKLIST.md) 与 [路线图](./docs/ROADMAP.md)。
 
 ## 启动（冷启动）
