@@ -7,6 +7,7 @@ import { DATA_DIR } from "./tasks.js";
 const USERS_DIR = join(DATA_DIR, "users");
 const SESSIONS = new Map(); // token -> {userId, issuedAt, expiresAt}
 const SESSION_TTL = 1000 * 60 * 60 * 24 * 30;
+const pushTails = new Map();
 
 async function usersIndex() {
   return ensureJson(join(USERS_DIR, "index.json"), { users: [] });
@@ -95,13 +96,14 @@ export async function pull(userId) {
 
 // 推送：带 baseRevision 乐观并发；冲突时返回服务端状态供合并。
 export async function push(userId, { state, baseRevision, strategy = "reject" }) {
-  const { path, data } = await userFile(userId);
-  if (baseRevision !== data.revision) {
-    if (strategy === "force") {
-      // 明确选择覆盖：先落历史副本，可恢复。
-      const history = join(USERS_DIR, "history", `${userId}-${data.revision}.json`);
-      await writeJson(history, data);
-    } else {
+  const previous = pushTails.get(userId) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  pushTails.set(userId, current);
+  await previous;
+  try {
+    const { path, data } = await userFile(userId);
+    if (baseRevision !== data.revision && strategy !== "force") {
       const e = new Error("版本冲突：服务端已有更新数据");
       e.statusCode = 409;
       e.payload = {
@@ -112,15 +114,23 @@ export async function push(userId, { state, baseRevision, strategy = "reject" })
       };
       throw e;
     }
+    if (strategy === "force") {
+      // 每次明确覆盖都保留当前服务端快照，文件名唯一且可恢复。
+      const history = join(USERS_DIR, "history", `${userId}-${data.revision}-${Date.now()}-${uuid()}.json`);
+      await writeJson(history, data);
+    }
+    const next = {
+      userId,
+      revision: data.revision + 1,
+      updatedAt: nowIso(),
+      state,
+    };
+    await writeJson(path, next);
+    return { revision: next.revision, updatedAt: next.updatedAt };
+  } finally {
+    release();
+    if (pushTails.get(userId) === current) pushTails.delete(userId);
   }
-  const next = {
-    userId,
-    revision: data.revision + 1,
-    updatedAt: nowIso(),
-    state,
-  };
-  await writeJson(path, next);
-  return { revision: next.revision, updatedAt: next.updatedAt };
 }
 
 export async function deleteAccountData(userId, { keepLocal }) {

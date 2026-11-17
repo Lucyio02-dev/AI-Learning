@@ -17,7 +17,7 @@ FAULTS = ["none", "frame", "actionLimit", "drift", "occlusion", "timeSkew", "uni
 
 
 class Rand:
-    """mulberry32 — 与前端实现一致，保证跨端可复现。"""
+    """mulberry32 — 与前端实现逐步一致，保证跨端可复现。"""
 
     def __init__(self, seed):
         self.a = seed & 0xFFFFFFFF
@@ -26,7 +26,7 @@ class Rand:
         self.a = (self.a + 0x6D2B79F5) & 0xFFFFFFFF
         t = self.a
         t = (t ^ (t >> 15)) * (t | 1) & 0xFFFFFFFF
-        t = (t + ((t ^ (t >> 7)) * (t | 61) & 0xFFFFFFFF)) & 0xFFFFFFFF
+        t = (t ^ (t + ((t ^ (t >> 7)) * (t | 61) & 0xFFFFFFFF))) & 0xFFFFFFFF
         x = ((t ^ (t >> 14)) & 0xFFFFFFFF)
         return x / 4294967296
 
@@ -51,9 +51,10 @@ def run_episode(start=(0, 0, 90), target=(3.0, 2.0), policy=None, fault="none",
     pose = [start[0], start[1], math.radians(start[2])]
     frames = []
     last_target = target
+    current_target = target
     success = False
     for t in range(max_steps):
-        observed = target
+        observed = current_target
         if fault == "occlusion" and t % 3 != 0:
             observed = last_target
         last_target = observed
@@ -81,22 +82,27 @@ def run_episode(start=(0, 0, 90), target=(3.0, 2.0), policy=None, fault="none",
         move = apply_r(rot(pose[2]), action)
         pose[0] += move[0]
         pose[1] += move[1]
-        err = math.hypot(pose[0] - target[0], pose[1] - target[1])
+        if fault == "occlusion" and t == 0:
+            current_target = (target[0] + 0.8, target[1] + 0.5)
+        err = math.hypot(pose[0] - current_target[0], pose[1] - current_target[1])
         frames.append({
             "t": t, "dt": dt,
             "pose": [round(pose[0], 4), round(pose[1], 4), round(math.degrees(pose[2]), 1)],
             "observed": list(observed),
+            "target": list(current_target),
+            **({"note": "目标在本周期内移动，后续两次观测被遮挡"} if fault == "occlusion" and t == 0 else {}),
             "action": [round(action[0], 4), round(action[1], 4)],
             "error": round(err, 4),
         })
         if err < tolerance:
             success = True
             break
-    final_err = math.hypot(pose[0] - target[0], pose[1] - target[1])
+    final_err = math.hypot(pose[0] - current_target[0], pose[1] - current_target[1])
     return {
         "frames": frames, "success": success, "finalError": round(final_err, 4),
         "steps": len(frames), "fault": fault, "noise": noise, "seed": seed,
         "target": list(target),
+        "finalTarget": list(current_target),
         "startPose": [round(start[0], 4), round(start[1], 4)],
     }
 

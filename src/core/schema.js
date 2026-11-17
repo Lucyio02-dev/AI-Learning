@@ -59,18 +59,18 @@ export function normalizeProgress(raw = {}) {
   const p = {};
   for (const [id, v] of Object.entries(object(raw) ? raw : {})) {
     if (!object(v)) continue;
-    // v2 遗留字段（explained/implemented/diagnosed/verified）只证明自报，
-    // 不冒充实验通过；v3 的 experimentPassed/reviewed 才是真实能力。
-    const legacy =
-      "diagnosed" in v || "verified" in v || "explained" in v || "implemented" in v;
+    // v2 旧字段在 fromV2 中单独降级；v3 中这四项是独立能力证据。
     p[str(id, 80)] = {
       read: bool(v.read),
-      selfReported: bool(v.selfReported) || legacy,
-      exercisePassed: bool(v.exercisePassed) && !legacy,
-      experimentPassed: !legacy && bool(v.experimentPassed),
-      reviewed: !legacy && bool(v.reviewed),
-      // v2 的 explained/implemented 字段不构成完整采集流程，
-      // 迁移时降级为自报状态，避免冒充已验证能力。
+      selfReported: bool(v.selfReported),
+      exercisePassed: bool(v.exercisePassed),
+      experimentPassed: bool(v.experimentPassed),
+      reviewed: bool(v.reviewed),
+      explained: bool(v.explained),
+      implemented: bool(v.implemented),
+      diagnosed: bool(v.diagnosed),
+      verified: bool(v.verified),
+      // 保留关联运行记录；旧版本能力字段只在 fromV2 中单独降级。
       evidence: arr(v.evidence)
         .map((x) => str(x, 100))
         .filter(Boolean)
@@ -208,8 +208,15 @@ function fromV3(raw) {
     const note = normalizeNote({ ...n, id });
     s.notes[str(id, 120)] = note;
   }
-  s.runs = arr(raw.runs).filter(object).map(normalizeRun).slice(-RUN_CAP * 3);
-  s.archive = arr(raw.archive).filter(object).map(normalizeRun).slice(-500);
+  const runMap = new Map(
+    [...arr(raw.archive), ...arr(raw.runs)]
+      .filter(object)
+      .map(normalizeRun)
+      .map((run) => [run.id, run]),
+  );
+  const allRuns = [...runMap.values()].sort((a, b) => a.time.localeCompare(b.time));
+  s.runs = allRuns.slice(-RUN_CAP);
+  s.archive = allRuns.slice(0, -RUN_CAP);
   s.resourceStates = normalizeResourceState(raw.resourceStates);
   // v3 之前的收藏字段兼容读取
   if (Array.isArray(raw.favorites))
@@ -233,12 +240,13 @@ function fromV3(raw) {
     s.projects[str(id, 60)] = {
       stages: object(p.stages) ? p.stages : {},
       report: str(p.report),
+      reportUpdatedAt: iso(p.reportUpdatedAt),
+      updatedAt: iso(p.updatedAt),
       linkedRunIds: arr(p.linkedRunIds).map((x) => str(x, 120)).slice(0, 500),
     };
   }
   s.quizAttempts = arr(raw.quizAttempts)
     .filter(object)
-    .slice(-1000)
     .map((q) => ({
       id: str(q.id, 120) || stableId("quiz"),
       time: iso(q.time) || new Date().toISOString(),
@@ -251,7 +259,7 @@ function fromV3(raw) {
         : "explained",
       answer: str(q.answer, 20000),
       score: object(q.score) ? q.score : null,
-      rubric: object(q.rubric) ? q.rubric : null,
+      rubric: Array.isArray(q.rubric) ? q.rubric.slice(0, 20).map(bool) : object(q.rubric) ? q.rubric : null,
       seenBefore: bool(q.seenBefore),
     }));
   s.reviews = object(raw.reviews) ? raw.reviews : {};

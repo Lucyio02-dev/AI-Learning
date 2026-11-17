@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { resolve, extname, sep } from "node:path";
-const root = resolve(import.meta.dirname, ".."),
+const root = resolve(process.env.AI_LEARNING_STATIC_ROOT || resolve(import.meta.dirname, "..")),
   port = Number(process.env.PORT) || 4173;
 const types = {
   ".html": "text/html; charset=utf-8",

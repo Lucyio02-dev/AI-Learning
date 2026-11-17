@@ -38,7 +38,7 @@
 
 ## 5. RAG：本地 embedding + 词项基线双轨
 
-**决策**：`experiments/rag_embed.py` 用 `BAAI/bge-small-zh-v1.5`（CPU、约 100MB、Apache-2.0）计算语料向量，落盘 `artifacts/rag/<indexId>/`；后端 `/api/rag/*` 提供 分块、向量检索（numpy 余弦精确排序，语料规模 <1万块足够）与词项检索基线并列。生成回答经第 3 条的模型代理，强制引用定位与原文核验。
+**决策**：`experiments/rag_embed.py` 用 `BAAI/bge-small-zh-v1.5`（CPU、约 100MB、Apache-2.0）计算语料向量；后端 `/api/rag/*` 在 `server/data/rag/` 保存索引，提供分块、向量检索（numpy 余弦排序）与词项检索基线并列。生成回答经第 3 条模型代理，要求回答引用资料 ID；当前自动检查只确认引用 ID 存在于实际上下文，并展示上下文供人工核对，不声称自动完成事实蕴含或原文支持验证。
 
 **解决的问题**：原版 RAG 只有词项匹配；embedding 真实可用且零边际成本（本地模型，不按 token 计费）；网络不可用时可退回词项基线（不伪造 embedding 结果）。
 

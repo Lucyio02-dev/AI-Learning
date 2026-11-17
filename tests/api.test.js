@@ -3,7 +3,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
+import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -48,13 +49,19 @@ test("健康检查：无密钥时明确报告 providers 未配置", async () => 
   assert.equal(deepseek.configured, false);
 });
 
-test("静态资源可用且禁止路径穿越", async () => {
+test("静态服务只开放前端资源，后端数据与仓库元数据不可读", async () => {
   const index = await fetch(`${BASE}/`);
   assert.equal(index.ok, true);
   const ok = await fetch(`${BASE}/app.js`);
   assert.equal(ok.status, 200);
+  const module = await fetch(`${BASE}/src/app/state.js`);
+  assert.equal(module.status, 200);
+  for (const path of ["/.git/config", "/package.json", "/.env", "/server/data/users/index.json", "/server/src/accounts.js"]) {
+    const hidden = await fetch(`${BASE}${path}`);
+    assert.equal(hidden.status, 404, `${path} 不应被静态服务读取`);
+  }
   const traversal = await fetch(`${BASE}/..%2f..%2fpackage.json`);
-  assert.ok([403, 404].includes(traversal.status), `穿越被拒绝：${traversal.status}`);
+  assert.equal(traversal.status, 404, `穿越被拒绝：${traversal.status}`);
 });
 
 test("模型代理：未配置密钥时返回 503 与明确错误码", async () => {
@@ -66,6 +73,63 @@ test("模型代理：未配置密钥时返回 503 与明确错误码", async () 
   assert.equal(res.status, 503);
   const data = await res.json();
   assert.equal(data.code, "E_MODEL_NO_KEY");
+});
+
+test("局域网绑定时模型与 RAG 要求登录，登录后可访问", async () => {
+  const dataDirNetwork = mkdtempSync(join(tmpdir(), "ai-learning-network-test-"));
+  const portServer = createNetServer();
+  await new Promise((resolve) => portServer.listen(0, "127.0.0.1", resolve));
+  const port = portServer.address().port;
+  await new Promise((resolve) => portServer.close(resolve));
+  const base = `http://127.0.0.1:${port}`;
+  const networkServer = spawn(process.execPath, ["server/index.js"], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: String(port), AI_LEARNING_HOST: "0.0.0.0", AI_LEARNING_DATA: dataDirNetwork, DEEPSEEK_API_KEY: "", GLM_API_KEY: "" },
+  });
+  try {
+    let ready = false;
+    for (let i = 0; i < 50; i++) {
+      try {
+        const response = await fetch(`${base}/api/health`);
+        if (response.ok) { ready = true; break; }
+      } catch {}
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.equal(ready, true, "局域网测试服务器应启动");
+
+    for (const [path, body] of [
+      ["/api/model/chat", { messages: [{ role: "user", content: "test" }] }],
+      ["/api/rag/query", { query: "测试", mode: "term" }],
+    ]) {
+      const response = await fetch(`${base}${path}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 401, `${path} 应要求登录`);
+      assert.equal((await response.json()).code, "E_NETWORK_AUTH");
+    }
+
+    const registration = await fetch(`${base}/api/accounts/register`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "network-user", password: "test-pass-123" }),
+    });
+    assert.equal(registration.status, 200);
+    const { token } = await registration.json();
+    const rag = await fetch(`${base}/api/rag/query`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ query: "图书馆几点关门", mode: "term" }),
+    });
+    assert.equal(rag.status, 200);
+    const model = await fetch(`${base}/api/model/chat`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ messages: [{ role: "user", content: "test" }] }),
+    });
+    assert.equal(model.status, 503, "登录后应通过认证并因无模型密钥得到明确 503");
+  } finally {
+    networkServer.kill();
+    if (networkServer.exitCode === null && networkServer.signalCode === null)
+      await new Promise((resolve) => networkServer.once("exit", resolve));
+    try { rmSync(dataDirNetwork, { recursive: true, force: true }); } catch {}
+  }
 });
 
 test("任务 API：白名单外脚本拒绝；参数校验", async () => {
@@ -81,6 +145,13 @@ test("任务 API：白名单外脚本拒绝；参数校验", async () => {
     body: JSON.stringify({ script: "experiments/inference.py" }),
   });
   assert.equal(bad2.status, 400);
+  const badPath = await fetch(`${BASE}/api/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ script: "experiments/embodied/collect.py", args: ["--out", "../users/index.json"] }),
+  });
+  assert.equal(badPath.status, 400);
+  assert.equal((await badPath.json()).code, "E_TASK_ARGUMENT");
 });
 
 test("任务生命周期：启动 inference --check → 运行 → 成功 → 日志可读", async () => {
@@ -213,6 +284,53 @@ test("同步：baseRevision 过期返回 409 冲突；force 覆盖可成功", as
   })).json();
   assert.equal(pulled.revision, revision);
   assert.equal(pulled.state.v, 3);
+  const historyDir = join(dataDir, "users", "history");
+  const history = readdirSync(historyDir).filter((name) => name.endsWith(".json"));
+  assert.ok(history.length, "显式 force 即使版本刚好匹配也留下覆盖前快照");
+  assert.equal(JSON.parse(readFileSync(join(historyDir, history[0]), "utf8")).state.v, 1);
+});
+
+test("同步并发写入串行检查版本，同一 baseRevision 只允许一次成功", async () => {
+  const token = await register("parallel", "password123");
+  const initial = await push(token, { v: 1 }, 0);
+  assert.equal(initial.status, 200);
+  const [a, b] = await Promise.all([
+    push(token, { v: 2 }, 1),
+    push(token, { v: 3 }, 1),
+  ]);
+  assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+  const state = await (await fetch(`${BASE}/api/sync/pull`, { headers: { Authorization: `Bearer ${token}` } })).json();
+  assert.equal(state.revision, 2);
+  assert.ok([2, 3].includes(state.state.v));
+});
+
+test("任务记录按账户隔离，参数运行在账户工作目录", async () => {
+  const alice = await register("task-alice", "password123");
+  const bob = await register("task-bob", "password456");
+  const created = await fetch(`${BASE}/api/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${alice}` },
+    body: JSON.stringify({ script: "experiments/embodied/sim.py", args: ["--fault", "occlusion", "--json-out", "reports/occlusion.json"], label: "owner-test" }),
+  });
+  assert.equal(created.status, 200);
+  const { id } = await created.json();
+  const hidden = await fetch(`${BASE}/api/tasks/${id}`, { headers: { Authorization: `Bearer ${bob}` } });
+  assert.equal(hidden.status, 404);
+  const ownList = await (await fetch(`${BASE}/api/tasks`, { headers: { Authorization: `Bearer ${alice}` } })).json();
+  assert.ok(ownList.tasks.some((task) => task.id === id));
+  const otherList = await (await fetch(`${BASE}/api/tasks`, { headers: { Authorization: `Bearer ${bob}` } })).json();
+  assert.ok(!otherList.tasks.some((task) => task.id === id));
+  let task;
+  for (let i = 0; i < 120; i++) {
+    task = await (await fetch(`${BASE}/api/tasks/${id}`, { headers: { Authorization: `Bearer ${alice}` } })).json();
+    if (["succeeded", "failed", "cancelled", "timeout"].includes(task.status)) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.equal(task.status, "succeeded");
+  assert.ok(task.artifacts.some((artifact) => artifact.name === "reports/occlusion.json"));
+  const meta = JSON.parse(readFileSync(join(dataDir, "tasks", id, "meta.json"), "utf8"));
+  const published = JSON.parse(readFileSync(join(dataDir, "artifacts", meta.ownerId, "reports", "occlusion.json"), "utf8"));
+  assert.equal(published.fault, "occlusion");
 });
 
 test("RAG API：词项模式在纯 Node 环境可用（不依赖 embedding）", async () => {
@@ -225,4 +343,23 @@ test("RAG API：词项模式在纯 Node 环境可用（不依赖 embedding）", 
   const data = await res.json();
   assert.ok(data.results.term.length, "词项检索有结果");
   assert.ok(data.results.term.some((d) => d.docId === "current" || d.docId === "archive"));
+});
+
+test("RAG 保留 overlap=0，且自选语料参与词项检索", async () => {
+  const res = await fetch(`${BASE}/api/rag/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query: "时间一致性",
+      mode: "term",
+      chunkSize: 40,
+      overlap: 0,
+      customCorpus: [{ title: "我的遥感笔记", text: "时间一致性是评价多时相遥感数据融合的重要指标。" }],
+    }),
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.params.chunkSize, 40);
+  assert.equal(data.params.overlap, 0);
+  assert.ok(data.results.term.some((d) => d.docId === "custom-1"));
 });

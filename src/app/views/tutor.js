@@ -32,6 +32,10 @@ export function render(route) {
   const ready = hasBackend() && providers().some((p) => p.configured);
   const courseId = route.id || S.continuePoint().course.id;
   const quizId = route.extra;
+  const quiz = getCourse(courseId)?.quiz?.find((item) => item.id === quizId);
+  const attempt = quizId
+    ? [...s.quizAttempts].reverse().find((item) => item.courseId === courseId && item.id.startsWith("quiz-" + quizId + "-"))
+    : null;
   const suggestions = [
     "用一句话解释这个课里最核心的机制",
     "我的实验失败了，误差一直是 3 左右，怎么办？",
@@ -61,8 +65,9 @@ export function render(route) {
     <span class="eyebrow">02 / ASK</span>
     <h2>提问</h2>
     <div class="suggestion-row">${suggestions.map((t) => `<button class="tab" data-suggest="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+    ${quiz ? "<div class=\"callout\"><strong>评价题上下文</strong><p>" + esc(quiz.prompt) + "</p><small>评分量规：" + esc(quiz.rubric.join("；")) + "</small>" + (attempt ? "<p>最近一次回答（自评 " + (attempt.score?.rubricSelf ?? 0) + "/" + (attempt.score?.rubricTotal ?? 0) + "）：</p><pre>" + esc(attempt.answer) + "</pre>" : "<p>还没有保存的回答。</p>") + "</div>" : ""}
     <label for="t-input">你的问题</label>
-    <textarea id="t-input" rows="4" placeholder="把报错、你的预测或评价题回答贴进来…"></textarea>
+    <textarea id="t-input" data-quiz-id="${esc(quizId || "")}" rows="4" placeholder="把报错、你的预测或评价题回答贴进来…">${quiz && attempt ? esc("请按量规点评我的回答：\n" + attempt.answer) : ""}</textarea>
     <div class="stack">
       ${button("发送（真实模型）", "tutor-send", "primary full")}
       ${button("清空对话", "tutor-clear", "secondary full")}
@@ -90,6 +95,8 @@ export function send(root) {
   const text = input.value.trim();
   if (!text) return;
   const courseId = root.querySelector("#t-course").value;
+  const quizId = root.querySelector("#t-input")?.dataset.quizId || "";
+  const quiz = getCourse(courseId)?.quiz?.find((item) => item.id === quizId);
   const out = root.querySelector("#output");
   history.push({ role: "user", content: text });
   out.innerHTML = historyHtml() + loading("助教思考中…");
@@ -99,6 +106,10 @@ export function send(root) {
     { role: "system", content: `当前课程上下文：\n${courseContext(courseId)}` },
     ...history.slice(-MAX_TURNS * 2).map((h) => ({ role: h.role, content: h.content })),
   ];
+  if (quiz) messages.splice(2, 0, {
+    role: "system",
+    content: "当前评价题：" + quiz.prompt + "\n评分量规：\n" + quiz.rubric.map((r) => "- " + r).join("\n") + "\n请只点评学生本次提交的内容，逐条引用回答中的证据判断满足/未满足/无法判断，并给出一个优先修改建议；这只是 AI 建议，不是人工复核，也不要修改能力状态。",
+  });
   modelChat({ messages, sampling: { temperature: 0.4, maxTokens: 800 } })
     .then((res) => {
       const refs = [...res.text.matchAll(/\[(课程:[\w-]+·[^@\]]+|通用知识)\]/g)].map((m) => m[1]);
@@ -131,5 +142,5 @@ export function bind(root) {
 }
 
 function rerender() {
-  import("../app.js").then(({ rerender }) => rerender());
+  import("../../../app.js").then(({ rerender }) => rerender());
 }

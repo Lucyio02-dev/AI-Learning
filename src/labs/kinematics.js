@@ -26,7 +26,7 @@ export const FAULTS = {
   frame: "参考系错误：世界位移被当作机体位移",
   actionLimit: "动作限幅：单步位移被截断",
   drift: "执行漂移：每步加入系统性偏差",
-  occlusion: "遮挡：目标观测缺失，使用旧估计",
+  occlusion: "遮挡：目标移动时观测缺失，控制器使用旧估计",
   timeSkew: "时间错位：动作滞后一个控制周期",
   unit: "单位错误：度被当弧度使用",
 };
@@ -71,10 +71,12 @@ export function runEpisode({
   const pose = { ...start };
   const frames = [];
   let lastObservedTarget = { ...target };
+  let currentTarget = { ...target };
   let success = false;
   for (let t = 0; t < maxSteps; t++) {
-    const observed =
-      fault === "occlusion" && t % 3 !== 0 ? { ...lastObservedTarget } : { ...target };
+    const observed = fault === "occlusion" && t % 3 !== 0
+      ? { ...lastObservedTarget }
+      : { ...currentTarget };
     lastObservedTarget = observed;
     const plan = planBodyAction(pose, observed, { correct: correct && fault !== "frame" });
     const act = executeAction(plan, { fault, noise, rand });
@@ -86,19 +88,23 @@ export function runEpisode({
     const move = apply(rot2(pose.theta), act);
     pose.x += move.x;
     pose.y += move.y;
-    const err = Math.hypot(pose.x - target.x, pose.y - target.y);
+    if (fault === "occlusion" && t === 0)
+      currentTarget = { x: target.x + 0.8, y: target.y + 0.5 };
+    const err = Math.hypot(pose.x - currentTarget.x, pose.y - currentTarget.y);
     frames.push({
       t,
       dt,
       pose: { x: +pose.x.toFixed(4), y: +pose.y.toFixed(4), theta: +(pose.theta * 180 / Math.PI).toFixed(1) },
       observed,
+      target: { ...currentTarget },
+      ...(fault === "occlusion" && t === 0 ? { note: "目标在本周期内移动，后续两次观测被遮挡" } : {}),
       planned: { x: +plan.x.toFixed(3), y: +plan.y.toFixed(3) },
       action: { x: +act.x.toFixed(3), y: +act.y.toFixed(3) },
       error: +err.toFixed(4),
     });
     if (err < tolerance) { success = true; break; }
   }
-  const finalError = Math.hypot(pose.x - target.x, pose.y - target.y);
+  const finalError = Math.hypot(pose.x - currentTarget.x, pose.y - currentTarget.y);
   return {
     frames,
     success,
@@ -108,6 +114,7 @@ export function runEpisode({
     noise,
     seed,
     target,
+    finalTarget: currentTarget,
   };
 }
 
@@ -142,7 +149,7 @@ export function faultProfiles(seed = 7, target = { x: 3, y: 2 }) {
             : f === "drift"
               ? "恒定方向偏差，目标停不住"
               : f === "occlusion"
-                ? "朝旧目标位置走，观测恢复时修正"
+              ? "目标移动后短暂沿旧观测行动，观测恢复后再追踪新位置"
                 : f === "timeSkew"
                   ? "起步迟一拍，其余正常"
                   : f === "unit"

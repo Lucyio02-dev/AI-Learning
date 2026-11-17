@@ -48,7 +48,7 @@ export const coursesCommon = [
             + "python experiments/inference.py --prompt \"退选截止时间是多少？\"\n"
             + "python experiments/inference.py --prompt \"根据以下规定回答。当前学期退选截止：第一周周五17:00。问题：退选截止时间是多少？\"",
           expected:
-            "第一条回答不含具体日期（权重里没有你的校历）；第二条回答会复述给出的规定。两次调用的 model_id 与采样参数记录在 JSON 运行记录中。",
+            "记录两次原始输出，不预设模型一定拒答或准确复述。检查两次调用的模型、采样参数与证据差异，并核对第二条是否忠实于给定规定。",
         },
         pitfalls: [
           "两次调用之间顺手改了模型版本或 max_tokens，变量没有控制住。",
@@ -141,11 +141,11 @@ export const coursesCommon = [
         body:
           "venv/conda 建立独立环境，用锁文件固定版本。experiments/requirements.lock.txt 记录了本平台验证过的版本组合；这是“在我们验证的环境里可复现”，不承诺所有环境。",
         code: {
-          lang: "bash",
-          run: "python",
+          lang: "powershell",
+          run: "terminal",
           src:
             "python -m venv .venv\n"
-            + ".venv\\Scripts\\activate          # Windows；macOS/Linux 用 source .venv/bin/activate\n"
+            + ".\\.venv\\Scripts\\Activate.ps1\n"
             + "python -m pip install -r experiments/requirements.lock.txt\n"
             + "python experiments/inference.py --check",
           expected: "输出 Python/torch/transformers 版本行与 “Dependency check passed”。",

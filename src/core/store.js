@@ -3,6 +3,7 @@
 // 错误恢复副本、导入范围预检与合并策略。
 import {
   SCHEMA_VERSION,
+  RUN_CAP,
   fresh,
   normalize,
   normalizeRun,
@@ -126,14 +127,19 @@ export function mergeStates(current, incoming) {
       exercisePassed: mine?.exercisePassed || p.exercisePassed,
       experimentPassed: mine?.experimentPassed || p.experimentPassed,
       reviewed: mine?.reviewed || p.reviewed,
+      explained: mine?.explained || p.explained,
+      implemented: mine?.implemented || p.implemented,
+      diagnosed: mine?.diagnosed || p.diagnosed,
+      verified: mine?.verified || p.verified,
       evidence: [...new Set([...(mine?.evidence || []), ...p.evidence])],
       viewedSteps: [...new Set([...(mine?.viewedSteps || []), ...p.viewedSteps])],
       updatedAt: [mine?.updatedAt, p.updatedAt].sort().at(-1) || "",
     };
   }
-  const seen = new Set([...s.runs, ...s.archive].map((r) => r.id));
-  for (const r of [...incoming.runs, ...incoming.archive])
-    if (!seen.has(r.id)) (s.archive.length > 400 ? s.archive : s.runs).push(r);
+  const runMap = new Map([...s.runs, ...s.archive, ...incoming.runs, ...incoming.archive].map((r) => [r.id, r]));
+  const allRuns = [...runMap.values()].sort((a, b) => a.time.localeCompare(b.time));
+  s.runs = allRuns.slice(-RUN_CAP);
+  s.archive = allRuns.slice(0, -RUN_CAP);
   for (const [id, rs] of Object.entries(incoming.resourceStates)) {
     const mine = s.resourceStates[id];
     s.resourceStates[id] = mine
@@ -148,12 +154,37 @@ export function mergeStates(current, incoming) {
   }
   const videoSeen = new Set(s.videos.map((v) => v.url));
   for (const v of incoming.videos)
-    if (!videoSeen.has(v.url)) s.videos.push(v);
-  for (const [id, p] of Object.entries(incoming.projects))
-    if (!s.projects[id] || !s.projects[id].report) s.projects[id] = p;
+    if (!videoSeen.has(v.url)) {
+      s.videos.push(v);
+      videoSeen.add(v.url);
+    }
+  for (const [id, p] of Object.entries(incoming.projects)) {
+    const mine = s.projects[id];
+    if (!mine) {
+      s.projects[id] = p;
+      continue;
+    }
+    const stages = { ...(mine.stages || {}) };
+    for (const [stageId, stage] of Object.entries(p.stages || {})) {
+      const currentStage = stages[stageId];
+      if (!currentStage || newer(stage.updatedAt, currentStage.updatedAt)) stages[stageId] = stage;
+    }
+    const incomingReportIsNewer = newer(p.reportUpdatedAt, mine.reportUpdatedAt);
+    s.projects[id] = {
+      ...mine,
+      stages,
+      report: incomingReportIsNewer && p.report ? p.report : (mine.report || p.report || ""),
+      reportUpdatedAt: incomingReportIsNewer && p.report ? p.reportUpdatedAt : (mine.reportUpdatedAt || p.reportUpdatedAt || ""),
+      updatedAt: newer(p.updatedAt, mine.updatedAt) ? p.updatedAt : mine.updatedAt,
+      linkedRunIds: [...new Set([...(mine.linkedRunIds || []), ...(p.linkedRunIds || [])])],
+    };
+  }
   const quizSeen = new Set(s.quizAttempts.map((q) => q.id));
   for (const q of incoming.quizAttempts)
-    if (!quizSeen.has(q.id)) s.quizAttempts.push(q);
+    if (!quizSeen.has(q.id)) {
+      s.quizAttempts.push(q);
+      quizSeen.add(q.id);
+    }
   if (newer(incoming.diagnostic.completedAt, s.diagnostic.completedAt))
     s.diagnostic = incoming.diagnostic;
   if (newer(incoming.last.updatedAt, s.last.updatedAt)) s.last = incoming.last;

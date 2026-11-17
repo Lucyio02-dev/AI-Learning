@@ -71,7 +71,7 @@ function shell(body) {
         </div>
         <p>笔记与实验保存在此浏览器<br>定期备份，让积累留得住。</p>
         <button class="text-button" data-action="backup">导出学习备份 ${icon("arrow")}</button>
-        <label class="text-button file-label">导入备份<input type="file" id="import" accept=".json,application/json"></label>
+        <button class="text-button" data-page="settings">导入备份 ${icon("arrow")}</button>
         <button class="text-button" data-page="settings">账户与同步 ${icon("arrow")}</button>
       </div>
     </aside>
@@ -136,28 +136,8 @@ root.addEventListener("click", (e) => {
   }
 });
 
-// 侧栏导入：直接走设置页的预检逻辑
-root.addEventListener("change", async (e) => {
+root.addEventListener("change", (e) => {
   const el = e.target;
-  if (el.id === "import" && el.files[0]) {
-    const text = await el.files[0].text();
-    try {
-      S.inspect(text);
-      go("settings");
-      setTimeout(() => {
-        const input = document.querySelector("#import");
-        if (input) {
-          const dt = new DataTransfer();
-          dt.items.add(el.files[0]);
-          input.files = dt.files;
-          input.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-      }, 100);
-    } catch (error) {
-      toast(`导入预检失败：${error.message}`);
-    }
-    el.value = "";
-  }
   if (el.id === "goal") {
     S.setGoal(el.value);
     toast("学习方向已更新，课程和记录都会保留。");

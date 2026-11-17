@@ -279,7 +279,7 @@ export const coursesLlm = [
             "python experiments/inference.py --sample --seed 7 --max-new-tokens 64 \\\n"
             + "  --prompt \"列出三种常见幻觉类型\"\n"
             + "# 对比贪心：去掉 --sample 再跑一次",
-          expected: "采样版每次不同；贪心版逐字节一致（同版本同硬件）。",
+          expected: "固定种子与版本时采样结果可复现；改种子观察输出变化。去掉 --sample 后比较贪心结果。",
         },
         pitfalls: [
           "把“随机性”当“创造性”不加控制地用于事实型任务。",
@@ -494,7 +494,7 @@ export const coursesLlm = [
             "# 真实 embedding 索引构建（CPU，首次下载约 110MB 模型）\n"
             + "python experiments/rag_embed.py index \\\n"
             + "  --input artifacts/rag/corpus.jsonl --out artifacts/rag/index-default",
-          expected: "生成 vectors.npy + meta.json（记录模型、维度、分块参数、构建时间）。",
+          expected: "生成 vectors.json、chunks.json 与 meta.json（记录模型、维度、分块参数、构建时间）。",
         },
         pitfalls: [
           "不分块直接整文档嵌入，长文档相似度被稀释。",

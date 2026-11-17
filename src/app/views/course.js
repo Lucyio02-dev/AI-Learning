@@ -3,7 +3,7 @@
 import * as S from "../state.js";
 import { esc, icon, sectionHead, details, md, button } from "../ui.js";
 import { go } from "../router.js";
-import { getCourse, tracks, getSections, labInfo } from "../../content/index.js";
+import { getCourse, tracks, getSections, labInfo, openSourceCasesForCourse } from "../../content/index.js";
 
 let stepDraft = 0;
 
@@ -57,6 +57,7 @@ export function render(route) {
     </div>
     ${c.lab ? `<div class="lesson-lab"><div><span class="eyebrow">LEARN BY DOING</span><h3>${esc(labInfo[c.lab].title)}</h3><p>${esc(labInfo[c.lab].kind)}</p></div><button class="primary" data-lab="${c.lab}">进入实验 ${icon("arrow")}</button></div>` : ""}
     ${(c.quiz || []).length ? quizBlock(c) : ""}
+    ${openSourceCaseBlock(c)}
     <div class="section-title"><h3>延伸资料</h3><span class="muted">来源链接 · 外部打开</span></div>
     ${(c.references || []).map((r) => `<a class="resource-link" href="${esc(r.url)}" target="_blank" rel="noreferrer"><span>${esc(r.title)}<small>${esc(r.kind)} · 核对 ${esc(r.verified?.date || "未标注")}（${esc(r.verified?.env || "外部来源")}）</small></span>↗</a>`).join("")}
     ${details("链接失效或内容有问题？", `<p class="muted">复制下面的反馈信息发给维护者（或保存为文件），附上你看到的现象：</p><textarea class="feedback-draft" rows="3" readonly>课程: ${esc(c.title)} (id=${esc(c.id)})
@@ -78,8 +79,36 @@ export function render(route) {
 </div>`;
 }
 
+function openSourceCaseBlock(course) {
+  const cases = openSourceCasesForCourse(course.id);
+  if (!cases.length) return "";
+  return `<section class="open-source-section">
+    <div class="section-title"><h3>把本课放进真实开源项目</h3><span class="muted">阅读路线 + 可交付练习</span></div>
+    <p class="open-source-intro">下面的仓库用于结构阅读和独立练习。练习是本课程原创设计，不要求复制上游实现。</p>
+    <div class="open-source-grid">${cases.map((item) => `
+      <article class="open-source-card">
+        <div class="open-source-head">
+          <div><span class="eyebrow">${item.stars.toLocaleString("en-US")} stars · ${esc(item.license)} · 核对 ${esc(item.checkedOn)}</span><h4>${esc(item.title)}</h4></div>
+          <a href="${esc(item.url)}" target="_blank" rel="noreferrer">打开仓库 ↗</a>
+        </div>
+        <p>${esc(item.summary)}</p>
+        ${item.statusNote ? `<p class="open-source-note">${esc(item.statusNote)}</p>` : ""}
+        <strong>建议阅读</strong>
+        <ol class="open-source-reading">${item.reading.map((entry) => `<li><a href="${esc(entry.url)}" target="_blank" rel="noreferrer">${esc(entry.title)}</a><code>${esc(entry.path)}</code><small>${esc(entry.focus)}</small></li>`).join("")}</ol>
+        <div class="open-source-task"><strong>本课练习</strong><p>${esc(item.lesson.task)}</p><small><b>交付物：</b>${esc(item.lesson.deliverable)}</small></div>
+        <small class="open-source-snapshot">GitHub star 数是 ${esc(item.checkedOn)} 的快照；许可证以仓库当前 LICENSE 文件为准。</small>
+      </article>`).join("")}</div>
+  </section>`;
+}
+
 function codeBlock(code) {
-  return `<div class="code-card"><div class="code-head"><span>${esc(code.lang)}</span><span class="muted">${code.run === "browser" ? "浏览器内可运行" : code.run === "python" ? "在 pyexp 环境运行" : "文本模板"}</span></div><pre><code>${esc(code.src)}</code></pre><div class="code-expected"><strong>预期输出</strong>${esc(code.expected || "见运行记录")}</div></div>`;
+  const command = /^(python(?:3)?(?:\.exe)?\s|py\s|\.\\\.venv\\|source\s)/m.test(code.src.trimStart());
+  const isTerminal = code.run === "terminal" || command;
+  const source = isTerminal ? code.src.replace(/\\\r?\n/g, " `\n") : code.src;
+  const label = isTerminal
+    ? "PowerShell 命令（在项目根目录运行）"
+    : code.run === "browser" ? "浏览器内可运行" : code.run === "python" ? "Python 代码片段（在 pyexp 环境运行）" : "文本模板";
+  return `<div class="code-card"><div class="code-head"><span>${esc(isTerminal ? "PowerShell" : code.lang)}</span><span class="muted">${label}</span></div><pre><code>${esc(source)}</code></pre><div class="code-expected"><strong>预期输出</strong>${esc(code.expected || "见运行记录")}</div></div>`;
 }
 
 function verificationBlock(c, p) {
@@ -112,7 +141,7 @@ function quizBlock(c) {
     <div class="card-meta"><span class="pill">${quizKindLabel(q.kind)}</span><span class="pill">${capabilityLabel(q.capability)}</span>${q.kind === "unseen" ? '<span class="pill dark">未见样例</span>' : ""}</div>
     <p>${esc(q.prompt)}</p>
     <textarea class="quiz-answer" aria-label="你的回答" placeholder="写下你的回答…"></textarea>
-    <div class="quiz-rubric"><strong>评分量规</strong><ul>${q.rubric.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></div>
+    <div class="quiz-rubric"><strong>评分量规（提交前自评）</strong><ul>${q.rubric.map((r, i) => `<li><label><input type="checkbox" class="quiz-rubric-check" data-rubric-index="${i}"> ${esc(r)}</label></li>`).join("")}</ul></div>
     <div class="quiz-actions">
       <button class="secondary" data-action="quiz-submit" data-quiz-id="${esc(q.id)}" data-course="${esc(c.id)}" data-capability="${esc(q.capability)}" data-kind="${esc(q.kind)}">提交并自评</button>
       <button class="text-button" data-action="quiz-tutor" data-quiz-id="${esc(q.id)}" data-course="${esc(c.id)}">让助教按量规点评（需后端）</button>
@@ -196,11 +225,11 @@ function bindQuiz(root) {
         capability,
         answer,
         seenBefore: kind !== "unseen",
-        score: { rubricSelf: "pending", checked: "rubric" },
       };
-      S.update((s) => s.quizAttempts.push(record));
-      S.setCapability(course, capability, true, record.id);
-      resultEl.innerHTML = `<div class="feedback pass"><strong>已记录（${capabilityLabel(capability)}）</strong><p>对照上方量规逐条自查：满足几条？把不满足的留给助教追问。能力证据可在“能力评价”页复核。</p></div>`;
+      record.rubric = [...card.querySelectorAll(".quiz-rubric input[type=checkbox]")].map((input) => input.checked);
+      record.score = { rubricSelf: record.rubric.filter(Boolean).length, rubricTotal: record.rubric.length, checked: "self-assessment" };
+      S.update((s) => s.quizAttempts.push(record), { silent: true });
+      resultEl.innerHTML = `<div class="feedback"><strong>作答已保存，自评 ${record.score.rubricSelf}/${record.score.rubricTotal}</strong><p>这只是自评记录，不会自动标记为能力通过。可以让助教按量规点评，或在“能力评价”页复核。</p></div>`;
     }),
   );
   root.querySelectorAll('[data-action="quiz-tutor"]').forEach((btn) =>

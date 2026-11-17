@@ -1,7 +1,7 @@
 // 项目空间：阶段任务、可展开提示、验收标准、报告草稿、运行证据关联、导出。
 import * as S from "../state.js";
 import { esc, icon, button, details, sectionHead } from "../ui.js";
-import { projects, getProject } from "../../content/index.js";
+import { projects, getProject, getOpenSourceCase } from "../../content/index.js";
 import { go } from "../router.js";
 
 export function render(route) {
@@ -39,11 +39,12 @@ function projectCard(p, s) {
 
 function renderProject(p, s) {
   const data = s.projects[p.id] || { stages: {}, report: "", linkedRunIds: [] };
-  const linkedRuns = s.runs.filter((r) => (p.id === "robot" ? r.lab === "embodied" : ["rag", "agent", "prompt"].includes(r.lab)));
+  const linkedRuns = runsForProject(p.id, s.runs);
   return `
 <button class="text-button back" data-page="projects">← 返回项目空间</button>
 <div class="page-heading"><div><span class="eyebrow">${esc(p.tag)}</span><h1>${esc(p.title)}</h1><p>${esc(p.summary)}</p></div></div>
 <div class="experiment-info"><span class="pill">运行条件</span><span>${esc(p.runConditions)}</span></div>
+${projectReferences(p)}
 <div class="project-stages">
   ${p.stages.map((st, i) => stageCard(p, st, data.stages[st.id] || {}, i)).join("")}
 </div>
@@ -71,10 +72,32 @@ function stageCard(p, st, saved, i) {
     <h4>任务</h4>
     <ul>${st.tasks.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
     ${st.starter ? `<small class="muted">起始代码：${esc(st.starter)}</small>` : ""}
+    ${st.links?.length ? `<div class="project-stage-links"><strong>本阶段参考</strong>${st.links.map((link) => `<a href="${esc(link.url)}" target="_blank" rel="noreferrer">${esc(link.title)} ↗</a>`).join("")}</div>` : ""}
     ${hints.length ? details("逐级提示（先自己试）", hints.map((h) => `<p><strong>提示 ${h.level}</strong>：${esc(h.text)}</p>`).join("")) : ""}
     <div class="verify-card"><strong>验收标准</strong><ul>${st.acceptance.map((a) => `<li>${esc(a)}</li>`).join("")}</ul></div>
     ${p.directions ? `<details class="fold"><summary>方向侧重（${Object.keys(p.directions).map((k) => ({ product: "产品", engineering: "工程", research: "研究" }[k])).join("/")}）</summary><div class="fold-body">${Object.entries(p.directions).map(([k, v]) => `<p><strong>${({ product: "产品", engineering: "工程", research: "研究" }[k])}</strong>：${esc(v)}</p>`).join("")}</div></details>` : ""}
   </section>`;
+}
+
+function projectReferences(project) {
+  const repos = (project.openSourceRefs || []).map((id) => getOpenSourceCase(id)).filter(Boolean);
+  if (!repos.length) return "";
+  return `<section class="project-references">
+    <div class="section-title"><h2>开源项目拆解路线</h2><span class="muted">星数快照：2026-11-17</span></div>
+    <p class="muted">练习围绕本项目设计；阅读上游实现时保留仓库边界，不把未运行的上游结果记成本地实验。</p>
+    <div class="project-reference-grid">${repos.map((repo) => `<article class="project-reference-card">
+      <div class="project-reference-meta">${repo.stars.toLocaleString("en-US")} stars · ${esc(repo.license)}</div>
+      <h3><a href="${esc(repo.url)}" target="_blank" rel="noreferrer">${esc(repo.title)} ↗</a></h3>
+      <p>${esc(repo.summary)}</p>
+      <ul>${repo.reading.slice(0, 2).map((entry) => `<li><a href="${esc(entry.url)}" target="_blank" rel="noreferrer">${esc(entry.title)}</a><small>${esc(entry.focus)}</small></li>`).join("")}</ul>
+    </article>`).join("")}</div>
+  </section>`;
+}
+
+function runsForProject(projectId, runs) {
+  if (projectId === "robot") return runs.filter((run) => run.lab === "embodied");
+  if (projectId === "assistant") return runs.filter((run) => ["rag", "agent", "prompt"].includes(run.lab));
+  return [];
 }
 
 export function bind(root) {
@@ -86,8 +109,10 @@ export function bind(root) {
     cb.addEventListener("change", () => {
       const [pid, sid] = cb.dataset.stageDone.split("/");
       S.update((s) => {
+        const updatedAt = new Date().toISOString();
         const proj = (s.projects[pid] ||= { stages: {}, report: "", linkedRunIds: [] });
-        proj.stages[sid] = { ...(proj.stages[sid] || {}), done: cb.checked };
+        proj.stages[sid] = { ...(proj.stages[sid] || {}), done: cb.checked, updatedAt };
+        proj.updatedAt = updatedAt;
       });
     }),
   );
@@ -95,7 +120,11 @@ export function bind(root) {
   report?.addEventListener("input", () => {
     S.update((s) => {
       const pid = report.dataset.report;
-      (s.projects[pid] ||= { stages: {}, report: "", linkedRunIds: [] }).report = report.value;
+      const updatedAt = new Date().toISOString();
+      const project = (s.projects[pid] ||= { stages: {}, report: "", linkedRunIds: [] });
+      project.report = report.value;
+      project.reportUpdatedAt = updatedAt;
+      project.updatedAt = updatedAt;
     }, { silent: true });
     const status = root.querySelector("#draft-status");
     if (status) status.textContent = "草稿已保存 · " + new Date().toLocaleTimeString("zh-CN");
@@ -105,10 +134,10 @@ export function bind(root) {
     const p = getProject(pid);
     const s = S.getState();
     const data = s.projects[pid] || {};
-    const linkedRuns = s.runs.filter((r) => (pid === "robot" ? r.lab === "embodied" : ["rag", "agent", "prompt"].includes(r.lab)));
+    const linkedRuns = runsForProject(pid, s.runs);
     import("../ui.js").then(({ download }) => {
       download(
-        `# ${p.title}\n\n${data.report || "尚未填写报告"}\n\n## 阶段完成情况\n\n${p.stages.map((st) => `### ${st.title}\n- 验收：${(data.stages?.[st.id]?.done) ? "通过" : "未标记"}\n${st.acceptance.map((a) => `  - [${(data.stages?.[st.id]?.done) ? "x" : " "}] ${a}`).join("\n")}`).join("\n\n")}\n\n## 关联实验记录\n\n${linkedRuns.map((r) => `### ${r.lab} · ${r.time}\n\n${r.summary}\n\n\`\`\`json\n${JSON.stringify(r.evidence, null, 2).slice(0, 4000)}\n\`\`\``).join("\n\n")}\n`,
+        `# ${p.title}\n\n${data.report || "尚未填写报告"}\n\n## 阶段完成情况\n\n${p.stages.map((st) => `### ${st.title}\n- 验收：${(data.stages?.[st.id]?.done) ? "通过" : "未标记"}\n${st.acceptance.map((a) => `  - [${(data.stages?.[st.id]?.done) ? "x" : " "}] ${a}`).join("\n")}`).join("\n\n")}\n\n## 关联实验记录\n\n${linkedRuns.map((r) => `### ${r.lab} · ${r.time}\n\n${r.summary}\n\n\`\`\`json\n${JSON.stringify(r.evidence, null, 2)}\n\`\`\``).join("\n\n")}\n`,
         `${pid}-项目档案.md`,
       );
     });

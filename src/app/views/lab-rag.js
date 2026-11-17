@@ -32,9 +32,9 @@ export function render() {
     </div>
     <label for="r-mode">检索方式</label>
     <select id="r-mode">
-      <option value="both" selected>词项基线 + embedding 对照（推荐）</option>
-      <option value="term">仅词项基线（纯浏览器）</option>
-      <option value="embedding">仅 embedding</option>
+      <option value="both" ${ready ? "selected" : "disabled"}>词项基线 + embedding 对照（推荐）</option>
+      <option value="term" ${ready ? "" : "selected"}>仅词项基线（纯浏览器）</option>
+      <option value="embedding" ${ready ? "" : "disabled"}>仅 embedding</option>
     </select>
     <div class="control-pair">
       <label class="check-row"><input id="r-current" type="checkbox">只检索当前版本</label>
@@ -42,7 +42,7 @@ export function render() {
     </div>
     <div class="control-pair">
       <label class="check-row"><input id="r-trunc" type="checkbox">注入故障：上下文截断</label>
-      <label class="check-row"><input id="r-gen" type="checkbox" ${ready ? "" : "disabled"}>调用模型生成回答（引用核验）</label>
+      <label class="check-row"><input id="r-gen" type="checkbox" ${ready ? "" : "disabled"}>调用模型生成回答（检查引用 ID）</label>
     </div>
     <label for="r-diagnosis">诊断：这个配置最大的风险是什么？</label>
     <select id="r-diagnosis">
@@ -58,7 +58,7 @@ export function render() {
       <label for="r-custom">粘贴你的资料（每段一条，用空行分隔；仅保存在本机，不发送到模型服务——生成引用时只会发送检索命中的片段）</label>
       <textarea id="r-custom" rows="4" placeholder="我的课程规定：退选截止时间为……">${esc(customCorpusText())}</textarea>
       <label class="check-row"><input id="r-use-custom" type="checkbox" ${customCorpusText() ? "checked" : ""}>把自选资料并入检索范围</label>
-      <small class="muted">导入会实际执行分块并展示元数据；embedding 模式下自选资料仅参与词项轨道（向量索引重建见项目空间阶段 2）。</small>
+      <small class="muted">自选资料会参与所选检索方式；首次向量检索或资料/分块参数变化时会在本机后端重建索引。</small>
     </div></details>
     <div class="stack">
       ${button("检索并查看证据", "run-rag", "primary full")}
@@ -129,7 +129,7 @@ export async function run(root) {
   const query = root.querySelector("#r-query").value.trim() || "选课课程退选截止时间";
   const topK = Number(root.querySelector("#r-k").value);
   const chunkSize = Number(root.querySelector("#r-chunk").value);
-  const overlap = Number(root.querySelector("#r-overlap").value);
+  const overlap = Math.min(Number(root.querySelector("#r-overlap").value), Math.floor(chunkSize / 2));
   const mode = root.querySelector("#r-mode").value;
   const currentOnly = root.querySelector("#r-current").checked;
   const missing = root.querySelector("#r-missing").checked;
@@ -139,29 +139,30 @@ export async function run(root) {
   // 自选资料先落盘（受控导入：仅本机）
   const customText = root.querySelector("#r-custom")?.value ?? "";
   const customCount = saveCustomCorpus(customText);
+  const customCorpus = root.querySelector("#r-use-custom")?.checked ? parseCustomCorpus() : [];
   const goldOn = root.querySelector("#r-gold")?.checked;
   const goldDoc = root.querySelector("#r-gold-doc")?.value || "current";
   const goldEvidence = goldOn
     ? chunked(chunkSize, overlap).filter((c) => c.docId === goldDoc).slice(0, 1)
     : null;
-  out.innerHTML = loading("检索中" + (generate ? "（含生成与引用核验）" : "") + "…");
+  out.innerHTML = loading("检索中" + (generate ? "（含生成与引用 ID 检查）" : "") + "…");
 
   try {
-    if (mode === "term" && !goldEvidence) {
+    if (mode === "term" && !goldEvidence && !generate) {
       // 纯浏览器词项检索
       const chunks = chunked(chunkSize, overlap);
       const docs = retrieve(query, { topK, currentOnly, missing, chunks });
-      renderTermResult(root, { query, topK, chunkSize, overlap, currentOnly, missing }, docs, diagnosis);
+      renderTermResult(root, { query, topK, chunkSize, overlap, currentOnly, missing, truncation }, docs, diagnosis);
       return;
     }
-    if (mode === "term" && goldEvidence) {
+    if (mode === "term" && goldEvidence && !generate) {
       // gold-evidence 对照（词项基线轨道）：跳过检索直接用人工证据
-      const res = { results: { embedding: [], term: goldEvidence }, context: goldEvidence, metrics: { gold: [], retrievalHitEmbedding: null, retrievalHitTerm: null }, params: { goldEvidence: true }, generation: null };
+      const res = { results: { embedding: [], term: goldEvidence }, context: truncateContext(goldEvidence, truncation), metrics: { gold: [], retrievalHitEmbedding: null, retrievalHitTerm: null }, params: { goldEvidence: true }, generation: null };
       renderServerResult(root, res, diagnosis, { topK, chunkSize, overlap, mode, currentOnly, missing, truncation, generate, gold: true });
       return;
     }
-    const res = await ragQuery({ query, topK, chunkSize, overlap, mode, currentOnly, missing, truncation, generate, goldEvidence });
-    renderServerResult(root, res, diagnosis, { topK, chunkSize, overlap, mode, currentOnly, missing, truncation, generate });
+    const res = await ragQuery({ query, topK, chunkSize, overlap, mode, currentOnly, missing, truncation, generate, goldEvidence, customCorpus });
+    renderServerResult(root, res, diagnosis, { topK, chunkSize, overlap, mode, currentOnly, missing, truncation, generate, gold: !!goldEvidence });
   } catch (error) {
     out.innerHTML = errorBox(error.message, error.code);
     if (error.code !== "E_MODEL_NO_BACKEND")
@@ -174,10 +175,13 @@ function renderTermResult(root, params, docs, diagnosis) {
   const out = root.querySelector("#output");
   const goldIds = ["current#c1"];
   const passed = docs.some((d) => goldIds.includes(d.id)) && diagnosisMatches(diagnosis, params);
+  const context = truncateContext(docs, params.truncation);
   out.innerHTML = `
+    ${params.truncation ? `<div class="feedback"><strong>故障已注入：实际上下文截断</strong><p>检索结果保留在上方；下面展示交给后续生成环节的上下文。</p></div>` : ""}
     ${docs.length
       ? docs.map((d) => `<article class="evidence-card"><div class="card-meta"><span class="pill ${d.current ? "success" : ""}">${d.current ? "当前资料" : "历史资料"}</span><span>匹配分 ${d.score}</span></div><h3>${esc(d.title)}</h3><small>${esc(d.date)} · ${esc(d.id)} · 版本 ${esc(d.version)}</small><p>${esc(d.text)}</p></article>`).join("")
       : '<div class="empty"><h3>没有召回证据</h3><p>检查查询、索引与资料覆盖，不能据此编造答案。</p></div>'}
+    ${details("实际上下文（本地模拟）", `<pre>${esc(context.map((c) => `[${c.id}] ${c.title} (${c.date})\n${c.text}`).join("\n\n") || "（无检索结果）")}</pre>`)}
     <div class="feedback ${passed ? "pass" : ""}"><strong>${passed ? "诊断通过" : "继续检查证据"}</strong><p>${feedbackText(params)}</p>${!docs.length ? "<p>当前查询无证据，未计为验证通过。</p>" : ""}</div>`;
   recordRun({
     lab: "rag", mode: "rule", summary: passed ? "依据检索证据完成诊断" : "完成检索，继续诊断", passed,
@@ -185,6 +189,13 @@ function renderTermResult(root, params, docs, diagnosis) {
     statuses: { diagnosed: passed, verified: false },
   });
   refreshHistory(root);
+}
+
+function truncateContext(context, enabled) {
+  if (!enabled || !context.length) return context;
+  return context.length > 1
+    ? context.slice(0, -1)
+    : [{ ...context[0], text: context[0].text.slice(0, Math.floor(context[0].text.length / 2)) }];
 }
 
 function diagnosisMatches(diagnosis, params) {
@@ -216,7 +227,7 @@ function renderServerResult(root, res, diagnosis, params) {
   if (res.generation) {
     const g = res.generation;
     generationHtml = `
-      <h3>生成回答与引用核验</h3>
+      <h3>生成回答与引用 ID 检查</h3>
       <div class="answer-card">
         <p>${esc(g.text)}</p>
         <div class="citation-strip">
@@ -224,10 +235,10 @@ function renderServerResult(root, res, diagnosis, params) {
             ? g.citations.map((c) => pill(g.validCitations.includes(c) ? `${c} ✓ 有效` : `${c} ✗ 上下文中不存在`, g.validCitations.includes(c) ? "success" : "")).join(" ")
             : pill("无引用标注", "")}
         </div>
+        <small class="muted">此处只检查引用 ID 是否出现在模型上下文；事实是否被该片段支持，需要你阅读下方原文后判断。</small>
         <small class="muted">${esc(g.model)} · ${g.elapsedMs}ms · ${g.usage?.total_tokens ?? "?"} tokens · 费用估算 ${g.costEstimate ? `${g.costEstimate.amount} ${g.costEstimate.currency}` : "—"}（${g.costEstimate?.basis || "estimate"}）</small>
-        ${g.grounded || g.refusal ? "" : `<div class="feedback"><strong>注意：回答没有引用也没有拒答</strong><p>这可能是“证据未使用/无依据回答”类失败，检查上下文构造与指令。</p></div>`}
+        ${g.citationOk || g.refusal ? "" : `<div class="feedback"><strong>注意：回答没有有效引用 ID，也没有拒答</strong><p>引用检查只确认 ID 在上下文中存在；是否支持对应事实仍需阅读下方上下文逐条核对。</p></div>`}
       </div>
-      ${details("查看完整实际上下文（发给模型的内容）", `<pre>${esc((res.context || []).map((c) => `[${c.id}] ${c.title} (${c.date})\n${c.text}`).join("\n\n"))}</pre>`)}
       ${details("查看实际请求 Prompt", `<pre>${esc(g.request || "见后端日志")}</pre>`)}`;
   }
 
@@ -237,6 +248,7 @@ function renderServerResult(root, res, diagnosis, params) {
     ${res.metrics.gold.length ? `<div class="metric-strip"><div><span>检索命中（embedding / 词项）</span><strong>${res.metrics.retrievalHitEmbedding ?? "—"} / ${res.metrics.retrievalHitTerm ?? "—"}</strong></div><div><span>正确块</span><strong>${esc(res.metrics.gold.join(" "))}</strong></div></div>` : ""}
     ${both ? `<div class="control-pair"><div>${details("词项基线结果", term.length ? term.map((d) => chunkCard(d, "·词项")).join("") : "<p class='muted'>无召回</p>")}</div><div>${details("embedding 结果", emb.length ? emb.map((d) => chunkCard(d, "·向量")).join("") : "<p class='muted'>无召回</p>")}</div></div>`
       : (emb.length ? emb : term).map((d) => chunkCard(d, "")).join("") || '<div class="empty"><h3>没有召回证据</h3><p>检查查询、索引与资料覆盖。</p></div>'}
+    ${details(params.generate ? "发给模型的实际上下文" : "实际上下文（本地模拟）", `<pre>${esc((res.context || []).map((c) => `[${c.id}] ${c.title} (${c.date})\n${c.text}`).join("\n\n") || "（无检索结果）")}</pre>`)}
     ${params.truncation ? `<div class="feedback"><strong>故障已注入：上下文截断</strong><p>正确证据可能被挤掉——对照上面检索结果与实际上下文的差异。</p></div>` : ""}
     ${generationHtml}
     <div class="feedback ${passed ? "pass" : ""}"><strong>${passed ? "诊断通过" : "继续检查证据"}</strong><p>${feedbackText(params)}</p></div>`;
@@ -247,7 +259,7 @@ function renderServerResult(root, res, diagnosis, params) {
     evidence: { params: res.params, metrics: res.metrics, embedding: emb.map(({ id, score }) => ({ id, score })), term: term.map(({ id, score }) => ({ id, score })), generation: res.generation ? { text: res.generation.text, citations: res.generation.citations, valid: res.generation.validCitations } : null },
     config: { ...res.params, indexModel: "bge-small-zh-v1.5", dim: 512 },
     metrics: res.metrics,
-    statuses: { diagnosed: passed, verified: !!res.generation && (res.generation.citationOk || res.generation.refusal) && passed },
+    statuses: { diagnosed: passed, verified: false },
   });
   refreshHistory(root);
 }

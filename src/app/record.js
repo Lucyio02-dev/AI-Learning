@@ -13,6 +13,9 @@ export function recordRun(run) {
   const saved = S.recordRun({ ...run, statuses });
   // 能力映射：诊断=诊断能力；验证需要独立验证路径（对照/gold-evidence/复核）
   if (courseId && statuses.diagnosed) S.setCapability(courseId, "diagnosed", true, saved.id);
-  if (courseId && statuses.verified) S.setCapability(courseId, "verified", true, saved.id);
+  if (courseId && statuses.verified) {
+    S.setCapability(courseId, "verified", true, saved.id);
+    S.setCapability(courseId, "experimentPassed", true, saved.id);
+  }
   return saved;
 }

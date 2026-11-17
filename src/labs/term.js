@@ -38,9 +38,11 @@ export const corpus = [
 // 分块（演示用参数化分块；真实资料在服务端同样按此参数分块）。
 export function chunkDocument(doc, { size = 60, overlap = 20 } = {}) {
   const text = doc.text;
+  const chunkSize = Math.max(1, Math.floor(Number(size) || 60));
+  const chunkOverlap = Math.max(0, Math.min(Math.floor(chunkSize / 2), Math.floor(Number(overlap) || 0)));
   const chunks = [];
-  for (let i = 0, n = 1; i < text.length; i += size - overlap, n++) {
-    const piece = text.slice(i, i + size);
+  for (let i = 0, n = 1; i < text.length; i += chunkSize - chunkOverlap, n++) {
+    const piece = text.slice(i, i + chunkSize);
     if (!piece) break;
     chunks.push({
       id: `${doc.id}#c${n}`,

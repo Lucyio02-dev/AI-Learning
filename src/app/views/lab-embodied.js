@@ -198,19 +198,24 @@ export function runProfiles(root) {  const profiles = faultProfiles(7);
 
 // ---------- 轨迹 SVG ----------
 function trajectorySvg(result, frameIdx = -1) {
-  const target = result.target;
+  const initialTarget = result.target;
   const sx = (x) => 220 + x * 40, sy = (y) => 190 - y * 40;
   const pts = result.frames.filter((f) => f.pose).map((f) => `${sx(f.pose[0])},${sy(f.pose[1])}`);
   const lastIdx = frameIdx >= 0 ? result.frames.findIndex((_, i) => i === frameIdx) : -1;
   const shown = frameIdx >= 0 ? result.frames.slice(0, lastIdx + 1).filter((f) => f.pose) : result.frames.filter((f) => f.pose);
   const shownPts = shown.map((f) => `${sx(f.pose[0])},${sy(f.pose[1])}`).join(" ");
   const cur = frameIdx >= 0 ? shown.at(-1) : result.frames.at(-1);
+  const target = cur?.target || result.finalTarget || initialTarget;
+  const observed = cur?.observed;
+  const moved = target[0] !== initialTarget[0] || target[1] !== initialTarget[1];
   return `<svg class="motion-plot" viewBox="0 0 440 380" role="img" aria-label="轨迹图，最终误差 ${result.finalError}">
     <defs><pattern id="grid2" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#e0e6e2"/></pattern></defs>
     <rect width="440" height="380" fill="url(#grid2)"/>
     <path d="M220 20V350M30 190H410" stroke="#7b8c85" fill="none"/>
+    ${moved ? `<circle cx="${sx(initialTarget[0])}" cy="${sy(initialTarget[1])}" r="6" fill="#8d9a93"/><text x="${sx(initialTarget[0]) + 10}" y="${sy(initialTarget[1]) + 18}">旧目标</text>` : ""}
     <circle cx="${sx(target[0])}" cy="${sy(target[1])}" r="9" fill="#ce8b42"/>
     <text x="${sx(target[0]) + 12}" y="${sy(target[1]) - 12}">目标 (${target[0]}, ${target[1]})</text>
+    ${observed && moved ? `<circle cx="${sx(observed[0])}" cy="${sy(observed[1])}" r="4" fill="#397baf"/><text x="${sx(observed[0]) + 8}" y="${sy(observed[1]) - 5}">当前观测</text>` : ""}
     ${shownPts ? `<polyline points="${shownPts}" fill="none" stroke="#397b68" stroke-width="2.5" stroke-dasharray="6 4"/>` : ""}
     ${cur ? `<circle cx="${sx(cur.pose[0])}" cy="${sy(cur.pose[1])}" r="6" fill="#205947"/>` : ""}
     <circle cx="220" cy="190" r="7" fill="#203e35"/>
@@ -240,7 +245,8 @@ function bindReplay(panel, result) {
     const f = result.frames[i];
     return `<table class="frame-table"><tbody>
       <tr><th>时间</th><td>t=${f.t} (${f.dt}s)</td></tr>
-      <tr><th>观察</th><td>目标 ${JSON.stringify(f.observed)}</td></tr>
+      <tr><th>真实目标</th><td>${JSON.stringify(f.target || result.target)}</td></tr>
+      <tr><th>观察</th><td>目标 ${JSON.stringify(f.observed)}${f.note ? ` · ${esc(f.note)}` : ""}</td></tr>
       <tr><th>状态</th><td>位姿 (${f.pose.map((x) => (typeof x === "number" ? +x.toFixed(2) : x)).join(", ")})</td></tr>
       <tr><th>指令(机体系)</th><td>${JSON.stringify(f.planned || f.action || null)}</td></tr>
       <tr><th>实际动作</th><td>${JSON.stringify(f.action)}</td></tr>
@@ -292,6 +298,16 @@ async function launchTask(root, { script, args, label, after }) {
     const task = await createTask({ script, args, label, config: { label } });
     status.innerHTML = `<small class="muted">任务 ${task.id.slice(0, 8)} 已排队</small>`;
     const finished = await waitForTask(task.id, { onUpdate: (t) => (status.innerHTML = loading(`${label} · ${t.status}`)) });
+    if (finished.status !== "succeeded") {
+      status.innerHTML = errorBox(`${label}未完成（${finished.status}），查看任务日志确认原因。`, "E_TASK_FAILED");
+      recordRun({
+        lab: "embodied", mode: "train", summary: `${label}失败（${finished.status}）`, passed: false,
+        evidence: { taskId: finished.id, status: finished.status, exitCode: finished.exitCode, log: (finished.log || "").slice(-2000) },
+        statuses: { diagnosed: false, verified: false },
+      });
+      refreshHistory(root);
+      return;
+    }
     status.innerHTML = `<small>${pill(finished.status === "succeeded" ? "完成" : finished.status, finished.status === "succeeded" ? "success" : "")} ${label} · ${finished.elapsedMs ?? 0}ms</small> ${details("查看日志", `<pre>${esc((finished.log || "").slice(-4000))}</pre>`)}`;
     after?.(finished, out);
   } catch (error) {
@@ -339,6 +355,16 @@ export async function evaluate(root) {
         label: `闭环评测 ${dist}`,
       });
       const finished = await waitForTask(task.id, { onUpdate: (t) => (status.innerHTML = loading(`评测 ${dist} · ${t.status}`)) });
+      if (finished.status !== "succeeded") {
+        recordRun({
+          lab: "embodied", mode: "train", summary: `闭环评测失败（${dist}：${finished.status}）`, passed: false,
+          evidence: { taskId: finished.id, status: finished.status, exitCode: finished.exitCode, log: (finished.log || "").slice(-2000) },
+          statuses: { diagnosed: false, verified: false },
+        });
+        refreshHistory(root);
+        status.innerHTML = errorBox(`评测 ${dist} 失败（${finished.status}），已停止后续评测。`, "E_TASK_FAILED");
+        return;
+      }
       results.push({ dist, finished });
     }
     status.innerHTML = "<small>评测完成</small>";

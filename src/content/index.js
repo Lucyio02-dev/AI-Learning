@@ -2,6 +2,9 @@
 import { coursesCommon } from "./courses-common.js";
 import { coursesLlm } from "./courses-llm.js";
 import { coursesEmbodied, coursesResearch } from "./courses-embodied.js";
+import { openSourceCases, openSourceCasesForCourse, getOpenSourceCase } from "./open-source-cases.js";
+
+export { openSourceCases, openSourceCasesForCourse, getOpenSourceCase };
 
 export const tracks = {
   all: "全部课程",
@@ -92,6 +95,7 @@ export const projects = [
     summary:
       "从需求定义到评估报告：分块、embedding 检索、生成引用、工具异常处理与回归评测的完整小项目。",
     runConditions: "本地后端 + Python 环境；嵌入模型 bge-small-zh（约 110MB，首次下载）。",
+    openSourceRefs: ["llama-index", "langgraph"],
     stages: [
       {
         id: "requirements",
@@ -174,6 +178,7 @@ export const projects = [
     summary:
       "从坐标与参考系，到轨迹数据检查、BC 策略训练、闭环评测与新场景泛化的完整仿真项目。",
     runConditions: "Python + torch（已锁版本）；CPU 数分钟级。",
+    openSourceRefs: ["lerobot"],
     stages: [
       {
         id: "frames",
@@ -240,6 +245,111 @@ export const projects = [
       research: "做噪声消融实验，画成功率-噪声曲线。",
     },
   },
+  {
+    id: "drone-mapping",
+    title: "无人机影像到可验证正射产品",
+    tag: "测绘遥感 · 摄影测量 / 地理 AI",
+    summary:
+      "从航片数据卡与 ODM 重建，到正射成果质量核验、地理可视化和 SAM 2 掩膜坐标回写，形成一份能复查来源、参数、位置精度与分割误差的制图档案。",
+    runConditions:
+      "Docker（ODM 小数据先行）+ Python/geemap；航测重建的耗时与存储随影像数量和分辨率变化。SAM 2 扩展需单独配置环境与模型权重。",
+    openSourceRefs: ["odm", "geemap", "sam2"],
+    stages: [
+      {
+        id: "flight-data",
+        title: "阶段 1 · 航片数据卡与处理设计",
+        brief: "先判断影像能否支撑目标产品，记录数据出处、坐标基准和质量风险。",
+        tasks: [
+          "选择一组小规模公开航片或自有影像，记录来源、许可、影像数量、相机/EXIF 与数据范围",
+          "写明目标坐标参考系、地面分辨率预期、控制点与独立检查点的用途",
+          "标注模糊、重复、曝光差异、重叠不足等风险，并说明是否继续处理",
+        ],
+        starter: "OpenDroneMap README → 输入目录与 Docker Quick start",
+        links: [
+          { title: "OpenDroneMap README / Quick start", url: "https://github.com/OpenDroneMap/ODM/blob/master/README.md" },
+        ],
+        hints: [
+          { level: 1, text: "先区分参与几何解算的 GCP 与独立检查点；同一批点不能同时证明外部精度。" },
+          { level: 2, text: "数据卡写清 CRS、单位、像元大小和影像来源，避免后续把像素偏差误读成地面距离。" },
+        ],
+        acceptance: ["数据卡含来源/许可/CRS/影像数量", "GCP 与检查点分开说明", "列出至少 3 个处理风险"],
+      },
+      {
+        id: "reconstruction",
+        title: "阶段 2 · ODM 重建与参数记录",
+        brief: "从小数据集跑通摄影测量流程，保存命令、版本和实际输出。",
+        tasks: [
+          "按 README 的 Docker 方式挂载影像目录并运行一次小规模重建",
+          "保存完整命令、ODM 镜像版本、运行日志和处理参数，不只截成功页面",
+          "核对生成目录中的正射影像、点云、三维模型或 DEM（哪些存在取决于数据和配置）",
+          "只调整一个处理参数重跑，记录处理时长、文件大小和成果差异",
+        ],
+        starter: "Docker + OpenDroneMap README 中的项目目录示例",
+        links: [
+          { title: "ODM README：Docker 命令和输出产品", url: "https://github.com/OpenDroneMap/ODM/blob/master/README.md" },
+          { title: "ODM dataset 阶段入口", url: "https://github.com/OpenDroneMap/ODM/blob/master/stages/dataset.py" },
+        ],
+        hints: [
+          { level: 1, text: "先用少量影像确认目录映射与输出位置，再扩大数据量。" },
+          { level: 2, text: "文件生成不等于成果合格：先检查 CRS、范围、像元大小和空洞。" },
+        ],
+        acceptance: ["可复现命令和版本记录", "至少一项正射/高程/三维成果", "单变量参数对照及差异说明"],
+      },
+      {
+        id: "quality",
+        title: "阶段 3 · 地理参考与位置质量核验",
+        brief: "把影像外观、坐标元信息和独立检查点放在一起判断。",
+        tasks: [
+          "用 QGIS 或 geemap 打开成果，检查 CRS、范围、像元大小、NoData 和影像方向",
+          "用未参与解算的检查点计算平面误差与 RMSE；若无独立点，明确标注无法报告外部位置精度",
+          "在地图中标出接缝、空洞、建筑倾斜或纹理拉花等问题，并保存位置与截图",
+          "改变地图缩放级别复核图层对齐，区分可视化重投影与真实数据坐标错误",
+        ],
+        starter: "geemap 快速开始 + 格式转换文档；本地栅格可先在 QGIS 检查",
+        links: [
+          { title: "geemap 快速开始", url: "https://github.com/gee-community/geemap/blob/master/docs/get-started.md" },
+          { title: "geemap 格式转换", url: "https://github.com/gee-community/geemap/blob/master/docs/conversion.md" },
+        ],
+        hints: [
+          { level: 1, text: "地图上看起来重合，不等于源文件 CRS 正确；同时核验元数据和已知坐标。" },
+          { level: 2, text: "水平 RMSE 以独立检查点的地面坐标差计算；不要把 GCP 拟合残差冒充独立精度。" },
+        ],
+        acceptance: ["CRS/范围/像元大小检查表", "独立点误差表或明确的精度缺项说明", "至少 3 个带位置的影像问题"],
+      },
+      {
+        id: "segmentation",
+        title: "阶段 4 · SAM 2 分割与地理坐标回写",
+        brief: "把提示式分割应用到小块正射影像，并验证掩膜仍落在正确地理位置。",
+        tasks: [
+          "从正射影像裁出 10 个固定大小样本，保存每个窗口的 affine transform、CRS 与影像来源",
+          "用点提示和框提示分别生成目标掩膜，在独立标注上计算 IoU 并记录失败类型",
+          "将掩膜写回栅格或矢量成果，检查重新打开后与原正射影像的空间叠加",
+          "至少留出一个不同地块/拍摄条件作外部样本，讨论提示式基础模型的领域偏移",
+        ],
+        starter: "SAM 2 image predictor notebook；地理参考变换由栅格处理代码单独维护",
+        links: [
+          { title: "SAM 2 图像预测示例", url: "https://github.com/facebookresearch/sam2/blob/main/notebooks/image_predictor_example.ipynb" },
+          { title: "SAM 2 image predictor", url: "https://github.com/facebookresearch/sam2/blob/main/sam2/sam2_image_predictor.py" },
+        ],
+        hints: [
+          { level: 1, text: "SAM 2 返回的是图像像素网格上的掩膜；裁剪窗口的空间变换必须由你保存并写回。" },
+          { level: 2, text: "同一区域同时用点提示和框提示，固定样本和标注，再比较 IoU；不要只挑成功案例。" },
+        ],
+        acceptance: ["10 个样本的提示策略与 IoU 表", "导出的掩膜保留 CRS/affine 且空间叠加正确", "至少 3 个失败案例和适用范围说明"],
+      },
+    ],
+    questions: [
+      "影像来源、坐标系、控制点与检查点分别是什么？",
+      "你实际生成了哪些 ODM 产品，命令和版本是什么？",
+      "位置精度由哪些独立数据支撑，不能据此声称什么？",
+      "SAM 2 掩膜怎样从像素坐标回到地理坐标，在哪些地块上失败？",
+    ],
+    directions: {
+      product: "说明制图成果的用户、更新频率、精度声明和人工复核入口。",
+      engineering: "保存数据清单、容器版本、命令、空间元数据和质量检查脚本。",
+      research: "比较提示策略或跨地块泛化；控制样本和标注，报告误差而非只展示可视化。",
+    },
+  },
 ];
 
 export const getProject = (id) => projects.find((p) => p.id === id) || null;
@@ -277,6 +387,17 @@ export function courseSearchEntries() {
         route: `course/${c.id}/${i}`,
       }),
     );
+  }
+  for (const item of openSourceCases) {
+    const courseId = Object.keys(item.lessons || {})[0];
+    entries.push({
+      type: "resource",
+      id: `github-${item.id}`,
+      title: `GitHub · ${item.repository}`,
+      text: `${item.summary} ${item.license} ${item.stars} stars`,
+      route: courseId ? `course/${courseId}/0` : "projects/drone-mapping",
+      url: item.url,
+    });
   }
   for (const p of projects)
     entries.push({

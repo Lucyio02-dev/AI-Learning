@@ -1,9 +1,10 @@
 // RAG 服务：真实 embedding 检索（持久 Python 进程）+ 词项基线 +
-// 引用核验的生成。词项基线在前端也可独立运行；此处统一服务端实现。
+// 引用 ID 核对的生成。词项基线在前端也可独立运行；此处统一服务端实现。
 import { spawn } from "node:child_process";
 import { resolve, join } from "node:path";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { createInterface } from "node:readline";
+import { createHash } from "node:crypto";
 import { nowIso, uuid } from "./util.js";
 import { chat } from "./llm.js";
 import { DATA_DIR } from "./tasks.js";
@@ -29,6 +30,8 @@ const GOLD = {
 
 function chunkDocs(docs, size, overlap) {
   const chunks = [];
+  size = Math.max(1, Math.floor(Number(size) || 200));
+  overlap = Math.max(0, Math.min(Math.floor(size / 2), Math.floor(Number(overlap) || 0)));
   for (const doc of docs) {
     const step = Math.max(1, size - overlap);
     let i = 1, n = 0;
@@ -50,29 +53,33 @@ let embProc = null;
 let embReady = false;
 let embIndexKey = "";
 
-async function ensureEmbedder(indexKey, indexDir) {
+async function ensureEmbedder(indexKey, indexDir, docs, chunkSize, overlap) {
   if (embProc && embIndexKey === indexKey && embReady) return;
   if (embProc) {
     embProc.kill();
     embProc = null;
     embReady = false;
   }
-  await mkdir(indexDir, { recursive: true });
-  const vectorsPath = join(indexDir, "vectors.json");
+  await mkdir(RAG_DIR, { recursive: true });
   let meta = null;
   try {
     meta = JSON.parse(await readFile(join(indexDir, "meta.json"), "utf8"));
-  } catch {
-    const corpusPath = join(RAG_DIR, "corpus.jsonl");
-    const docs = BUILTIN_CORPUS;
-    await writeFile(corpusPath, docs.map((d) => JSON.stringify(d)).join("\n"));
+    if (meta.chunkSize !== chunkSize || meta.overlap !== overlap || meta.numDocs !== docs.length) meta = null;
+  } catch { meta = null; }
+  if (!meta) {
+    await rm(indexDir, { recursive: true, force: true });
+    await mkdir(indexDir, { recursive: true });
+    const corpusPath = join(RAG_DIR, `corpus-${indexKey}.jsonl`);
+    await writeFile(corpusPath, docs.map((d) => JSON.stringify(d)).join("\n"), "utf8");
     await new Promise((done, fail) => {
       const proc = spawn("python", [
         resolve(ROOT, "experiments/rag_embed.py"), "index",
         "--input", corpusPath, "--out", indexDir,
+        "--chunk-size", String(chunkSize), "--overlap", String(overlap),
       ], { env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
       let tail = "";
       proc.stderr.on("data", (d) => (tail += d));
+      proc.on("error", fail);
       proc.on("close", (code) => (code === 0 ? done() : fail(new Error(`索引构建失败(${code})：${tail.slice(-500)}`))));
     });
     meta = JSON.parse(await readFile(join(indexDir, "meta.json"), "utf8"));
@@ -132,7 +139,15 @@ function termRetrieve(query, chunks, { topK, currentOnly, missing }) {
     .slice(0, topK);
 }
 
-export async function ragQuery({
+let ragQueue = Promise.resolve();
+
+export function ragQuery(options) {
+  const current = ragQueue.then(() => runRagQuery(options));
+  ragQueue = current.catch(() => {});
+  return current;
+}
+
+async function runRagQuery({
   query,
   topK = 3,
   chunkSize = 200,
@@ -143,17 +158,20 @@ export async function ragQuery({
   truncation = false,
   generate = false,
   goldEvidence = null, // 人工指定正确证据（诊断用）
+  customCorpus = [],
 }) {
-  const indexKey = `builtin-${chunkSize}-${overlap}`;
+  const docs = [...BUILTIN_CORPUS, ...customCorpus];
+  const contentHash = createHash("sha256").update(JSON.stringify(docs)).digest("hex").slice(0, 20);
+  const indexKey = `${contentHash}-${chunkSize}-${overlap}`;
   const indexDir = join(RAG_DIR, "index-" + indexKey);
-  const chunks = chunkDocs(BUILTIN_CORPUS, chunkSize, overlap);
+  const chunks = chunkDocs(docs, chunkSize, overlap);
   const retrievedEmbedding = [];
   let indexMeta = null;
 
   if (mode === "embedding" || mode === "both") {
     if (missing) {
       // 故障注入在请求层做：排除正确文档的 embedding 召回
-      await ensureEmbedder(indexKey, indexDir);
+      await ensureEmbedder(indexKey, indexDir, docs, chunkSize, overlap);
       const res = await askEmbedder({
         query, topK: topK + 1, currentOnly, filterIds: missing ? ["current"] : null,
       });
@@ -161,7 +179,7 @@ export async function ragQuery({
       retrievedEmbedding.push(...res.results.slice(0, topK));
       indexMeta = { faultInjected: "missing", note: "已从召回中移除 current 文档" };
     } else {
-      await ensureEmbedder(indexKey, indexDir);
+      await ensureEmbedder(indexKey, indexDir, docs, chunkSize, overlap);
       const res = await askEmbedder({ query, topK, currentOnly });
       if (!res.ok) throw new Error(res.error);
       retrievedEmbedding.push(...res.results);
@@ -174,11 +192,14 @@ export async function ragQuery({
   const gold = GOLD[query] || [];
   const hit = (results) => (gold.length ? (results.some((r) => gold.includes(r.id)) ? 1 : 0) : null);
 
-  let context = goldEvidence?.length
-    ? goldEvidence
+  let context = Array.isArray(goldEvidence)
+    ? goldEvidence.map((e) => chunks.find((c) => c.id === e.id)).filter(Boolean)
     : (mode === "term" ? termResults : retrievedEmbedding);
-  if (truncation && context.length > 1)
-    context = context.slice(0, Math.max(1, context.length - 1));
+  if (truncation && context.length) {
+    context = context.length > 1
+      ? context.slice(0, context.length - 1)
+      : [{ ...context[0], text: context[0].text.slice(0, Math.floor(context[0].text.length / 2)) }];
+  }
 
   let generation = null;
   if (generate) {
@@ -205,7 +226,6 @@ export async function ragQuery({
       citations: cited,
       validCitations,
       citationOk: cited.length > 0 && cited.every((c) => validCitations.includes(c)),
-      grounded: /\[.*#c\d+\]/.test(llm.text) || /资料未覆盖/.test(llm.text),
       refusal: /资料未覆盖|无法确定|没有找到/.test(llm.text),
       contextUsed: context.map((c) => c.id),
     };

@@ -182,7 +182,7 @@ export const coursesEmbodied = [
           lang: "python",
           run: "python",
           src:
-            "python experiments/embodied/evaluate.py --model artifacts/embodied/bc-model \\\n"
+            "python experiments/embodied/evaluate.py --model artifacts/embodied/bc-model/policy.pt \\\n"
             + "  --episodes 50 --target-dist new --json-out artifacts/logs/bc-eval.json",
           expected: "成功率（如 ≥90% 训练分布）、位置误差均值、新分布成功率（通常下降）。",
         },

@@ -43,11 +43,11 @@ export function render() {
     <p class="muted">最近备份：${s.backedUp ? fmtTime(s.backedUp) : "尚未导出"}</p>
     <div class="stack">
       <button class="primary" data-action="backup">导出完整备份（JSON）</button>
-      <label class="secondary file-label">导入备份（先预检）<input id="import" type="file" accept=".json,application/json"></label>
+      <label class="secondary file-label">导入备份（先预检）<input id="backup-import-input" type="file" accept=".json,application/json"></label>
       <button class="secondary" data-action="archive-export">导出归档记录</button>
     </div>
     <div id="import-preview"></div>
-    <p class="caption">导入前会生成可恢复的服务端/本机双备份（不依赖浏览器下载）；预检显示范围与冲突，替换或合并由你选择。</p>
+    <p class="caption">导入前会先将当前数据保存在本机恢复备份中；预检显示范围与冲突，替换或合并由你选择。</p>
   </section>
 </div>
 <div class="lower-grid">
@@ -80,11 +80,10 @@ export function bind(root) {
     try {
       status.innerHTML = loading("注册中…");
       const data = await register(root.querySelector("#reg-user").value.trim(), root.querySelector("#reg-pass").value);
-      S.setSyncAccount(data.user, true);
-      status.innerHTML = `<span class="pill success">注册成功</span> 已登录 ${esc(data.user.username)}，可推送数据`;
-      rerender();
+      await connectAccount(data, status, "注册成功");
     } catch (error) {
-      status.innerHTML = errorBox(error.message, error.code);
+      const latestStatus = document.querySelector("#sync-status");
+      if (latestStatus) latestStatus.innerHTML = errorBox(error.message, error.code);
     }
   });
   root.querySelector('[data-action="account-login"]')?.addEventListener("click", async () => {
@@ -92,11 +91,10 @@ export function bind(root) {
     try {
       status.innerHTML = loading("登录中…");
       const data = await login(root.querySelector("#login-user").value.trim(), root.querySelector("#login-pass").value);
-      S.setSyncAccount(data.user, true);
-      status.innerHTML = `<span class="pill success">登录成功</span> ${esc(data.user.username)}`;
-      rerender();
+      await connectAccount(data, status, "登录成功");
     } catch (error) {
-      status.innerHTML = errorBox(error.message, error.code);
+      const latestStatus = document.querySelector("#sync-status");
+      if (latestStatus) latestStatus.innerHTML = errorBox(error.message, error.code);
     }
   });
   root.querySelector('[data-action="account-logout"]')?.addEventListener("click", async () => {
@@ -110,14 +108,21 @@ export function bind(root) {
       status.innerHTML = loading("拉取中…");
       const remote = await syncPull();
       if (!remote.state) {
-        status.innerHTML = '<p class="muted">服务器上还没有数据，先“推送到服务器”。</p>';
+        S.setSyncAccount(S.getState().sync?.account, true, remote.revision);
+        const latestStatus = document.querySelector("#sync-status");
+        if (latestStatus) latestStatus.innerHTML = '<p class="muted">服务器上还没有数据，先“推送到服务器”。</p>';
         return;
       }
-      S.applyRemote(remote.state, remote.revision, S.getState().sync?.account);
-      status.innerHTML = `<span class="pill success">已拉取</span> 服务器版本 r${remote.revision}`;
-      rerender();
+      const { mergeStates } = await import("../../core/store.js");
+      const { normalize } = await import("../../core/schema.js");
+      const merged = mergeStates(S.getState(), normalize(remote.state));
+      const result = await syncPush(merged, remote.revision, "reject");
+      S.applyRemote(merged, result.revision, S.getState().sync?.account);
+      const latestStatus = document.querySelector("#sync-status");
+      if (latestStatus) latestStatus.innerHTML = `<span class="pill success">本机与服务器已合并</span> 服务器版本 r${result.revision}`;
     } catch (error) {
-      status.innerHTML = errorBox(error.message, error.code);
+      const latestStatus = document.querySelector("#sync-status");
+      if (latestStatus) latestStatus.innerHTML = errorBox(error.message, error.code);
     }
   });
   root.querySelector('[data-action="sync-push"]')?.addEventListener("click", async () => {
@@ -137,21 +142,31 @@ export function bind(root) {
             <button class="secondary" data-action="conflict-download">下载服务器数据稍后处理</button>
           </div></div>`;
         const merge = async () => {
-          const { mergeStates } = await import("../../core/store.js");
-          const { fresh } = await import("../../core/schema.js");
-          const remoteState = { ...fresh(), ...serverState };
-          const merged = mergeStates(S.getState(), remoteState);
-          const result = await syncPush(merged, error.payload.serverRevision, "force");
-          S.update((s) => { s.state = merged; }, { silent: true });
-          S.markSynced(result.revision);
-          status.innerHTML = `<span class="pill success">已合并推送</span> r${result.revision}`;
-          rerender();
+          try {
+            const { mergeStates } = await import("../../core/store.js");
+            const { fresh, normalize } = await import("../../core/schema.js");
+            const remoteState = serverState ? normalize(serverState) : fresh();
+            const merged = mergeStates(S.getState(), remoteState);
+            const result = await syncPush(merged, error.payload.serverRevision, "reject");
+            S.applyRemote(merged, result.revision, S.getState().sync?.account);
+            const latestStatus = document.querySelector("#sync-status");
+            if (latestStatus) latestStatus.innerHTML = `<span class="pill success">已合并推送</span> r${result.revision}`;
+          } catch (mergeError) {
+            const latestStatus = document.querySelector("#sync-status");
+            if (latestStatus) latestStatus.innerHTML = errorBox(mergeError.message, mergeError.code);
+          }
         };
         status.querySelector('[data-action="conflict-merge"]').onclick = merge;
         status.querySelector('[data-action="conflict-overwrite"]').onclick = async () => {
-          const result = await syncPush(S.getState(), error.payload.serverRevision, "force");
-          S.markSynced(result.revision);
-          status.innerHTML = `<span class="pill success">已覆盖</span> r${result.revision}`;
+          try {
+            const result = await syncPush(S.getState(), error.payload.serverRevision, "force");
+            S.markSynced(result.revision);
+            const latestStatus = document.querySelector("#sync-status");
+            if (latestStatus) latestStatus.innerHTML = `<span class="pill success">已覆盖</span> r${result.revision}`;
+          } catch (overwriteError) {
+            const latestStatus = document.querySelector("#sync-status");
+            if (latestStatus) latestStatus.innerHTML = errorBox(overwriteError.message, overwriteError.code);
+          }
         };
         status.querySelector('[data-action="conflict-download"]').onclick = () => {
           import("../ui.js").then(({ download }) => download(JSON.stringify({ state: serverState }, null, 2), "server-data.json", "application/json"));
@@ -170,7 +185,7 @@ export function bind(root) {
       toast("备份已导出，包含笔记、实验、归档与旧版原始数据。");
     });
   });
-  root.querySelector("#import")?.addEventListener("change", async (e) => {
+  root.querySelector("#backup-import-input")?.addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const preview = root.querySelector("#import-preview");
@@ -203,10 +218,12 @@ export function bind(root) {
   async function doImport(mode) {
     const preview = root.querySelector("#import-preview");
     try {
-      const fileInput = root.querySelector("#import");
       const result = S.importData(importPlan.incomingState ? JSON.stringify({ state: importPlan.incomingState }) : "", mode);
-      preview.innerHTML = `<span class="pill success">导入完成</span> 模式：${mode === "merge" ? "合并" : "替换"}。导入前数据已备份到本机存储（ai-learning-import-backup），并下载为文件。`;
-      import("../ui.js").then(({ toast }) => toast("导入成功，页面即将刷新。"));
+      import("../ui.js").then(({ download, toast }) => {
+        download(result.backup, "ai-learning-pre-import-backup.json", "application/json");
+        toast("导入成功，导入前备份已保存在本机并下载。");
+      });
+      preview.innerHTML = `<span class="pill success">导入完成</span> 模式：${mode === "merge" ? "合并" : "替换"}。导入前数据已保存在本机恢复备份中，并下载为文件。`;
       setTimeout(() => location.reload(), 900);
     } catch (error) {
       preview.innerHTML = errorBox(`导入失败：${error.message}`, error.code);
@@ -234,5 +251,19 @@ export function bind(root) {
 }
 
 function rerender() {
-  import("../app.js").then(({ rerender }) => rerender());
+  import("../../../app.js").then(({ rerender }) => rerender());
+}
+
+async function connectAccount(data, status, actionLabel) {
+  S.setSyncAccount(data.user, true, 0);
+  const remote = await syncPull();
+  S.setSyncAccount(data.user, true, remote.revision);
+  const { mergeStates } = await import("../../core/store.js");
+  const { fresh, normalize } = await import("../../core/schema.js");
+  const remoteState = remote.state ? normalize(remote.state) : fresh();
+  const merged = mergeStates(S.getState(), remoteState);
+  const result = await syncPush(merged, remote.revision, "reject");
+  S.applyRemote(merged, result.revision, data.user);
+  const latestStatus = document.querySelector("#sync-status");
+  if (latestStatus) latestStatus.innerHTML = `<span class="pill success">${esc(actionLabel)}</span> ${esc(data.user.username)}，本机与服务器数据已合并同步至 r${result.revision}`;
 }

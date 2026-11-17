@@ -2,17 +2,21 @@
 // 纯 Node 标准库，无第三方依赖。启动：npm run server
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { resolve, extname, sep, join } from "node:path";
-import { send, readJson, withinRoot } from "./src/util.js";
+import { resolve, extname, sep, join, relative } from "node:path";
+import { send, readJson } from "./src/util.js";
 import { providerStatus, chat } from "./src/llm.js";
 import { createTask, listTasks, taskDetail, cancelTask, restoreTasks, ensureDirs, DATA_DIR } from "./src/tasks.js";
 import { register, login, authUser, logout, pull, push } from "./src/accounts.js";
 import { ragQuery } from "./src/rag.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
+const PUBLIC_ROOT_FILES = new Set([
+  "index.html", "app.js", "styles.css", "service-worker.js", "site.webmanifest",
+]);
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.AI_LEARNING_HOST || "127.0.0.1"; // 局域网第二设备同步时设为 0.0.0.0
 const startedAt = new Date().toISOString();
+const taskAuthRequired = !["127.0.0.1", "::1", "localhost"].includes(HOST);
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -39,6 +43,29 @@ function httpError(status, code, message, payload) {
   return e;
 }
 
+function requireNetworkAccount(req, purpose = "服务") {
+  const user = authUser(req);
+  if (taskAuthRequired && !user)
+    throw httpError(401, "E_NETWORK_AUTH", `局域网${purpose}需要先登录账户`);
+  return user;
+}
+
+function taskOwner(req) {
+  return requireNetworkAccount(req, "任务")?.userId || "local";
+}
+
+function publicFile(urlPath) {
+  let decoded;
+  try { decoded = decodeURIComponent(urlPath); } catch { return null; }
+  if (decoded.includes("\\") || decoded.includes("\0")) return null;
+  const rel = decoded.replace(/^\/+/, "") || "index.html";
+  const normalized = resolve(ROOT, rel);
+  const fromRoot = relative(ROOT, normalized);
+  if (fromRoot.startsWith("..") || fromRoot.includes(`..${sep}`)) return null;
+  if (!PUBLIC_ROOT_FILES.has(fromRoot) && !fromRoot.startsWith(`src${sep}`)) return null;
+  return normalized;
+}
+
 const routes = {
   "GET /api/health": async () => ({
     ok: true,
@@ -49,6 +76,7 @@ const routes = {
   }),
   "GET /api/model/providers": async () => ({ providers: providerStatus() }),
   "POST /api/model/chat": async (req) => {
+    requireNetworkAccount(req, "模型调用");
     const body = await readJson(req);
     const messages = Array.isArray(body.messages) ? body.messages.slice(0, 40) : null;
     if (!messages || messages.some((m) => !m || typeof m.content !== "string"))
@@ -61,33 +89,54 @@ const routes = {
     });
     return result;
   },
-  "GET /api/tasks": async () => ({ tasks: await listTasks() }),
+  "GET /api/tasks": async (req) => ({ tasks: await listTasks(taskOwner(req)) }),
   "POST /api/tasks": async (req) => {
     const body = await readJson(req);
     if (!body.script || !Array.isArray(body.args))
       throw httpError(400, "E_VALIDATION", "需要 script 与 args");
+    if (body.args.some((arg) => typeof arg !== "string"))
+      throw httpError(400, "E_VALIDATION", "实验参数必须是字符串数组");
     return createTask({
       script: String(body.script),
-      args: body.args.map(String),
+      args: body.args,
       label: String(body.label || "").slice(0, 100),
       config: body.config && typeof body.config === "object" ? body.config : {},
+      ownerId: taskOwner(req),
     });
   },
   "POST /api/rag/query": async (req) => {
+    requireNetworkAccount(req, "RAG 查询");
     const body = await readJson(req);
+    const chunkSize = Number.isFinite(Number(body.chunkSize))
+      ? Math.min(600, Math.max(40, Number(body.chunkSize)))
+      : 200;
+    const overlap = Number.isFinite(Number(body.overlap))
+      ? Math.min(200, Math.floor(chunkSize / 2), Math.max(0, Number(body.overlap)))
+      : Math.min(40, Math.floor(chunkSize / 2));
+    const customCorpus = Array.isArray(body.customCorpus)
+      ? body.customCorpus.slice(0, 20).map((doc, i) => ({
+          id: `custom-${i + 1}`,
+          title: String(doc?.title || `自选资料 ${i + 1}`).slice(0, 200),
+          date: String(doc?.date || "").slice(0, 40),
+          version: "user",
+          current: true,
+          text: String(doc?.text || "").slice(0, 2000),
+        })).filter((doc) => doc.text)
+      : [];
     return ragQuery({
       query: String(body.query || "").slice(0, 500),
       topK: Math.min(6, Math.max(1, Number(body.topK) || 3)),
-      chunkSize: Math.min(600, Math.max(40, Number(body.chunkSize) || 200)),
-      overlap: Math.min(200, Math.max(0, Number(body.overlap) || 40)),
+      chunkSize,
+      overlap,
       mode: ["term", "embedding", "both"].includes(body.mode) ? body.mode : "embedding",
       currentOnly: !!body.currentOnly,
       missing: !!body.missing,
       truncation: !!body.truncation,
       generate: !!body.generate,
       goldEvidence: Array.isArray(body.goldEvidence)
-        ? body.goldEvidence.filter((c) => c && typeof c === "object" && typeof c.id === "string").slice(0, 6)
+        ? body.goldEvidence.filter((c) => c && typeof c.id === "string").slice(0, 6).map((c) => ({ id: c.id.slice(0, 120) }))
         : null,
+      customCorpus,
     });
   },
   "POST /api/accounts/register": async (req) => register(await readJson(req)),
@@ -127,8 +176,9 @@ const server = createServer(async (req, res) => {
     const taskMatch = url.pathname.match(/^\/api\/tasks\/([\w-]+)(\/cancel)?$/);
     if (taskMatch) {
       const [_, taskId, cancel] = taskMatch;
-      if (req.method === "GET") send(res, 200, await taskDetail(taskId));
-      else if (cancel) send(res, 200, await cancelTask(taskId));
+      const ownerId = taskOwner(req);
+      if (req.method === "GET" && !cancel) send(res, 200, await taskDetail(taskId, ownerId));
+      else if (req.method === "POST" && cancel) send(res, 200, await cancelTask(taskId, ownerId));
       else throw httpError(405, "E_VALIDATION", "不支持的方法");
       return;
     }
@@ -137,20 +187,34 @@ const server = createServer(async (req, res) => {
       return;
     }
     // 静态文件
-    const requested = withinRoot(ROOT, "." + decodeURIComponent(url.pathname));
+    const requested = publicFile(url.pathname);
     if (!requested) {
-      send(res, 403, { error: "forbidden" });
+      send(res, 404, { error: "not_found" });
       return;
     }
-    const target = (await stat(requested)).isDirectory()
-      ? resolve(requested, "index.html")
-      : requested;
-    const content = await readFile(target);
-    res.writeHead(200, {
-      "Content-Type": TYPES[extname(target)] || "application/octet-stream",
-      "Cache-Control": "no-store",
-    });
-    res.end(content);
+    let target = requested;
+    try {
+      if ((await stat(requested)).isDirectory()) {
+        target = resolve(requested, "index.html");
+        const fromRoot = relative(ROOT, target);
+        if (!fromRoot.startsWith(`src${sep}`)) {
+          send(res, 404, { error: "not_found" });
+          return;
+        }
+      }
+      const content = await readFile(target);
+      res.writeHead(200, {
+        "Content-Type": TYPES[extname(target)] || "application/octet-stream",
+        "Cache-Control": "no-store",
+      });
+      res.end(content);
+    } catch (error) {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") {
+        send(res, 404, { error: "not_found" });
+        return;
+      }
+      throw error;
+    }
   } catch (error) {
     const status = error.statusCode || (error.code === "E_MODEL_NO_KEY" ? 503 : 500);
     send(res, status, {

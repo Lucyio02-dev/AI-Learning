@@ -61,7 +61,6 @@ export function recordRun(run) {
   if (state.runs.length > RUN_CAP) {
     const overflow = state.runs.length - RUN_CAP;
     state.archive.push(...state.runs.splice(0, overflow));
-    if (state.archive.length > 500) state.archive.splice(0, state.archive.length - 500);
   }
   save();
   return r;
@@ -178,6 +177,11 @@ export function inspect(text) {
   return inspectImport(text, state);
 }
 export function importData(text, mode) {
+  if (readOnly) {
+    const error = new Error("当前数据以只读恢复模式打开，请先导出备份后重新载入");
+    error.code = "E_STORAGE_READ_ONLY";
+    throw error;
+  }
   const plan = inspect(text);
   const { next, backup } = applyImport(plan, mode, state);
   const check = validateState(next);
@@ -186,14 +190,20 @@ export function importData(text, mode) {
     error.code = "E_IMPORT_SCHEMA";
     throw error;
   }
+  const backupKey = "ai-learning-import-backup";
+  try {
+    localStorage.setItem(backupKey, backup);
+  } catch {
+    const error = new Error("导入前备份写入失败，现有数据未更改。请先导出备份或释放浏览器存储空间。");
+    error.code = "E_IMPORT_BACKUP_FAILED";
+    throw error;
+  }
   if (!persist(localStorage, next)) {
-    const error = new Error("存储空间不足，未替换现有数据");
+    const error = new Error("存储空间不足，未替换现有数据；导入前备份已保留在本机");
     error.code = "E_STORAGE_QUOTA";
     throw error;
   }
-  const backupKey = "ai-learning-import-backup";
-  try { localStorage.setItem(backupKey, backup); } catch {}
-  state = normalize(JSON.parse(backup) && next);
+  state = normalize(next);
   notify();
   return { plan, backup };
 }
@@ -218,24 +228,35 @@ export function saveDiagnostic(answers) {
 
 // 同步（完整模式）。
 export function applyRemote(remoteState, revision, account) {
-  state = remoteState;
-  state.sync = { ...state.sync, enabled: true, account, revision };
-  save();
+  if (!remoteState || typeof remoteState !== "object") {
+    const error = new Error("服务器没有可恢复的数据");
+    error.code = "E_SYNC_EMPTY";
+    throw error;
+  }
+  const next = normalize(remoteState);
+  next.sync = { ...next.sync, enabled: true, account, revision };
+  if (readOnly || !persist(localStorage, next)) {
+    const error = new Error("服务器数据已保留；本机存储空间不足或处于只读模式，未替换本机数据");
+    error.code = "E_SYNC_LOCAL_STORAGE";
+    throw error;
+  }
+  state = next;
   notify();
 }
 export function markSynced(revision) {
   update((s) => { s.sync.revision = revision; }, { silent: true });
 }
-export function setSyncAccount(account, enabled) {
+export function setSyncAccount(account, enabled, revision = 0) {
   update((s) => {
     s.sync.account = account;
     s.sync.enabled = enabled;
+    s.sync.revision = revision;
   });
 }
 
 export function totalEvidence() {
   return Object.values(state.progress).reduce(
-    (n, p) => n + ["read", "selfReported", "exercisePassed", "experimentPassed", "reviewed"].filter((k) => p[k]).length,
+    (n, p) => n + ["read", "selfReported", "exercisePassed", "experimentPassed", "reviewed", "explained", "implemented", "diagnosed", "verified"].filter((k) => p[k]).length,
     0,
   );
 }

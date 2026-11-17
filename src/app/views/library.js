@@ -305,5 +305,5 @@ function bindResources(root) {
 }
 
 function rerender() {
-  import("../app.js").then(({ rerender }) => rerender());
+  import("../../../app.js").then(({ rerender }) => rerender());
 }

@@ -22,6 +22,8 @@ DIM = 512  # bge-small hidden size; verified at runtime
 
 
 def chunk_text(text, size=200, overlap=40):
+    size = max(1, int(size))
+    overlap = max(0, min(size // 2, int(overlap)))
     step = max(1, size - overlap)
     chunks = []
     i = n = 0

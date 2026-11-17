@@ -36,7 +36,7 @@ export function render() {
   ${rows.length
     ? rows.map((q) => `<details class="fold"><summary><span class="pill">${quizKindLabel(q.kind)}</span> ${esc(getCourse(q.courseId)?.title || q.courseId)} · ${capabilityLabel(q.capability)} <small class="muted">${fmtTime(q.time)}</small></summary>
       <div class="fold-body"><p><strong>你的回答</strong></p><pre>${esc(q.answer.slice(0, 2000))}</pre>
-      <p class="muted">量规自查：对照课程页量规逐条标记。修订回答请在课程页重新提交，系统保留历史以便对比变化。</p></div></details>`).join("")
+      <p class="muted">量规自评：${q.score?.rubricSelf ?? 0}/${q.score?.rubricTotal ?? 0} 条。提交与自评不会自动标记为能力通过；修订回答请在课程页重新提交，系统保留历史以便对比变化。</p></div></details>`).join("")
     : '<p class="muted">还没有作答记录。进入课程页的“能力评价题”开始。</p>'}
 </section>
 <section class="panel">

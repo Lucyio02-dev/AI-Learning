@@ -193,7 +193,8 @@ export function recoverStep(root) {
     recover(run);
   }
   if (run.phase === "verified" && run.recoveredStatus === "confirmed") {
-    run.done = true;
+    finish(run);
+    clearCheckpoint();
   }
   saveCheckpoint(run);
   renderRun(root, run);
@@ -254,7 +255,7 @@ export function bind(root) {
     clearCheckpoint();
     activeRun = null;
     render();
-    import("../app.js").then(({ rerender }) => rerender());
+    import("../../../app.js").then(({ rerender }) => rerender());
   });
   root.querySelector('[data-course="agent"]')?.addEventListener("click", () => go("course", "agent", "0"));
 }

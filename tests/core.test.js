@@ -1,6 +1,8 @@
 // 核心行为回归：迁移链、导入预检、实验室引擎、内容一致性、运动学。
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import {
   fresh, normalize, stableId, normalizeRun, normalizeNote,
 } from "../src/core/schema.js";
@@ -8,7 +10,8 @@ import {
   load, persist, exported, parseImport, inspectImport, applyImport, mergeStates, validateState, KEY, V2_KEY, LEGACY_KEY,
 } from "../src/core/store.js";
 import { AppError, isCode } from "../src/core/errors.js";
-import { courses, getCourse, validateContent, getSections, projects, labInfo } from "../src/content/index.js";
+import * as AppState from "../src/app/state.js";
+import { courses, getCourse, validateContent, getSections, projects, labInfo, openSourceCases, openSourceCasesForCourse, courseSearchEntries } from "../src/content/index.js";
 import { retrieve, chunkDocument, evalSet, retrievalHit, gradeAnswer, corpus } from "../src/labs/term.js";
 import { promptDemo, buildVariants, checkJson, evaluateAnswer, aggregate } from "../src/labs/prompt.js";
 import { motion, runEpisode, faultProfiles, rng, FAULTS } from "../src/labs/kinematics.js";
@@ -113,17 +116,49 @@ test("导入预检：显示范围/冲突/建议模式；未知版本拒绝", () 
   assert.equal(empty.version, 3);
 });
 
-test("合并策略：同字段取较新，运行记录按 ID 去重", () => {
+test("合并策略：笔记/项目取较新，阶段与运行记录去重", () => {
   const a = fresh();
   const b = fresh();
   a.notes.n1 = normalizeNote({ id: "n1", body: "A", updatedAt: "2026-01-01T00:00:00Z" });
   b.notes.n1 = normalizeNote({ id: "n1", body: "B较新", updatedAt: "2026-02-01T00:00:00Z" });
   a.runs = [normalizeRun({ id: "same", lab: "rag" })];
   b.runs = [normalizeRun({ id: "same", lab: "rag" }), normalizeRun({ id: "extra", lab: "prompt" })];
+  a.projects.p1 = {
+    stages: { one: { done: true, updatedAt: "2026-01-01T00:00:00Z" } },
+    report: "旧报告", reportUpdatedAt: "2026-01-01T00:00:00Z", linkedRunIds: ["same"],
+  };
+  b.projects.p1 = {
+    stages: { two: { done: true, updatedAt: "2026-02-01T00:00:00Z" } },
+    report: "新报告", reportUpdatedAt: "2026-02-01T00:00:00Z", linkedRunIds: ["extra"],
+  };
   const merged = mergeStates(a, b);
   assert.equal(merged.notes.n1.body, "B较新");
   assert.equal(merged.runs.length, 2, "同 ID 去重，新记录进入活跃区");
   assert.ok(merged.runs.some((r) => r.id === "extra"));
+  assert.deepEqual(Object.keys(merged.projects.p1.stages).sort(), ["one", "two"]);
+  assert.equal(merged.projects.p1.report, "新报告");
+  assert.deepEqual(merged.projects.p1.linkedRunIds.sort(), ["extra", "same"]);
+});
+
+test("规范化保留长历史与四类能力证据", () => {
+  const raw = fresh();
+  raw.runs = Array.from({ length: 125 }, (_, i) => ({ id: `run-${i}`, lab: "rag", time: `2026-01-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z` }));
+  raw.archive = Array.from({ length: 602 }, (_, i) => ({ id: `archive-${i}`, lab: "rag", time: `2025-01-${String((i % 28) + 1).padStart(2, "0")}T00:00:00Z` }));
+  raw.quizAttempts = Array.from({ length: 1005 }, (_, i) => ({ id: `quiz-${i}`, courseId: "foundation", answer: "已保存", rubric: [true, false], score: { rubricSelf: 1, rubricTotal: 2 } }));
+  raw.progress.foundation = { diagnosed: true, verified: true, experimentPassed: true };
+  const normalized = normalize(raw);
+  assert.equal(normalized.runs.length + normalized.archive.length, 727);
+  assert.equal(normalized.archive.length, 627);
+  assert.equal(normalized.quizAttempts.length, 1005);
+  assert.equal(normalized.quizAttempts[0].rubric[0], true);
+  assert.equal(normalized.progress.foundation.diagnosed, true);
+  assert.equal(normalized.progress.foundation.verified, true);
+  assert.equal(normalized.progress.foundation.experimentPassed, true);
+});
+
+test("分块重叠不能大到让步长归零或逐字符增长", () => {
+  const chunks = chunkDocument({ id: "x", text: "abcdefghij" }, { size: 4, overlap: 99 });
+  assert.deepEqual(chunks.map((c) => c.text), ["abcd", "cdef", "efgh", "ghij", "ij"]);
 });
 
 test("validateState 拦截危险键与非 http 视频", () => {
@@ -142,6 +177,35 @@ test("存储空间耗尽返回失败，导出不受影响", () => {
     false,
   );
   assert.equal(parseImport(exported(s)).version, 3);
+});
+
+test("导入在本机恢复备份成功前中止，不覆盖当前状态", () => {
+  const priorStorage = globalThis.localStorage;
+  const values = new Map();
+  let failBackup = false;
+  const fakeStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => {
+      if (failBackup && key === "ai-learning-import-backup") throw new Error("Quota");
+      values.set(key, String(value));
+    },
+    removeItem: (key) => values.delete(key),
+  };
+  globalThis.localStorage = fakeStorage;
+  try {
+    AppState.init();
+    AppState.saveNote("keep", { title: "原有数据", body: "不能丢" });
+    const incoming = fresh();
+    incoming.notes.imported = normalizeNote({ id: "imported", body: "新数据" });
+    failBackup = true;
+    assert.throws(() => AppState.importData(exported(incoming), "replace"), (error) => error.code === "E_IMPORT_BACKUP_FAILED");
+    assert.ok(AppState.getState().notes.keep);
+    assert.equal(values.has("ai-learning-lab-v3"), true);
+    assert.equal(values.has("ai-learning-import-backup"), false);
+  } finally {
+    if (priorStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = priorStorage;
+  }
 });
 
 test("稳定 ID 与运行记录归一化", () => {
@@ -196,6 +260,35 @@ test("项目含阶段任务/提示/验收；实验注册完整", () => {
     }
   }
   for (const id of ["prompt", "rag", "agent", "embodied"]) assert.ok(labInfo[id]);
+});
+
+test("高星开源案例含可核对阅读路径、原创练习和课程映射", () => {
+  assert.ok(openSourceCases.length >= 8);
+  for (const item of openSourceCases) {
+    assert.match(item.url, /^https:\/\/github\.com\//, item.id);
+    assert.ok(item.repository && item.license && item.stars >= 1000, item.id);
+    assert.equal(item.checkedOn, "2026-11-17", item.id);
+    assert.ok(item.reading.length, `${item.id} 缺阅读路线`);
+    for (const entry of item.reading) {
+      assert.match(entry.url, /^https:\/\/github\.com\//, `${item.id}/${entry.path}`);
+      assert.ok(entry.focus, `${item.id}/${entry.path} 缺阅读目标`);
+    }
+    for (const [courseId, lesson] of Object.entries(item.lessons || {})) {
+      assert.ok(getCourse(courseId), `${item.id} 映射到不存在的课程 ${courseId}`);
+      assert.ok(lesson.connection && lesson.task && lesson.deliverable, `${item.id}/${courseId} 内容不完整`);
+    }
+  }
+  assert.ok(openSourceCasesForCourse("rag").some((item) => item.id === "llama-index"));
+  assert.ok(openSourceCasesForCourse("agent").some((item) => item.id === "langgraph"));
+  const githubSearch = courseSearchEntries().filter((entry) => entry.id.startsWith("github-"));
+  assert.equal(githubSearch.length, openSourceCases.length);
+  assert.ok(githubSearch.find((entry) => entry.id === "github-llama-index")?.route.startsWith("course/rag/"));
+  assert.ok(githubSearch.find((entry) => entry.id === "github-odm")?.route === "projects/drone-mapping");
+  const mappingProject = projects.find((p) => p.id === "drone-mapping");
+  assert.ok(mappingProject);
+  assert.equal(mappingProject.stages.length, 4);
+  assert.deepEqual(mappingProject.openSourceRefs, ["odm", "geemap", "sam2"]);
+  assert.ok(mappingProject.stages.every((stage) => stage.links?.length && stage.acceptance?.length));
 });
 
 test("教材章节只作为来源属性，不作为课程身份", () => {
@@ -351,6 +444,33 @@ test("闭环 episode：无故障收敛，故障特征可区分", () => {
   // 伪随机一致性
   const r1 = rng(5), r2 = rng(5);
   for (let i = 0; i < 10; i++) assert.equal(r1(), r2());
+});
+
+test("Python 与 JavaScript 仿真伪随机一致，遮挡产生旧观测与目标移动", () => {
+  const python = spawnSync("python", ["-c", [
+    "import json",
+    "from experiments.embodied.sim import Rand, run_episode",
+    "r = Rand(7)",
+    "print(json.dumps({'random': [r() for _ in range(8)], 'episode': run_episode(fault='occlusion', seed=7)}))",
+  ].join("; ")], { cwd: resolve(import.meta.dirname, ".."), encoding: "utf8", timeout: 20000 });
+  assert.equal(python.status, 0, python.stderr || python.error?.message);
+  const { random: pythonRandom, episode: pythonEpisode } = JSON.parse(python.stdout.trim());
+  const rand = rng(7);
+  for (const value of pythonRandom) assert.ok(Math.abs(rand() - value) < 1e-15);
+
+  const jsEpisode = runEpisode({ fault: "occlusion", seed: 7 });
+  assert.equal(jsEpisode.steps, 4);
+  assert.deepEqual(jsEpisode.frames.slice(1, 3).map((frame) => frame.observed), [
+    { x: 3, y: 2 }, { x: 3, y: 2 },
+  ]);
+  assert.deepEqual(jsEpisode.finalTarget, { x: 3.8, y: 2.5 });
+  assert.deepEqual(pythonEpisode.finalTarget, [3.8, 2.5]);
+  assert.equal(jsEpisode.finalError, pythonEpisode.finalError);
+  for (let i = 0; i < jsEpisode.frames.length; i++) {
+    assert.ok(Math.abs(jsEpisode.frames[i].pose.x - pythonEpisode.frames[i].pose[0]) < 0.0001);
+    assert.ok(Math.abs(jsEpisode.frames[i].pose.y - pythonEpisode.frames[i].pose[1]) < 0.0001);
+    assert.ok(Math.abs(jsEpisode.frames[i].error - pythonEpisode.frames[i].error) < 0.0001);
+  }
 });
 
 test("故障特征表覆盖全部故障且签名不同", () => {

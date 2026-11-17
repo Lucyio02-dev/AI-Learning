@@ -1,7 +1,8 @@
-node_modules/ 
-*.log 
-artifacts/ 
-__pycache__/ 
-*.pyc 
-server/data/ 
+node_modules/
+*.log
+dist/
+artifacts/
+__pycache__/
+*.pyc
+server/data/
 .venv/
