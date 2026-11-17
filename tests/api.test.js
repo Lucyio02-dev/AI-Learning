@@ -154,13 +154,13 @@ test("任务 API：白名单外脚本拒绝；参数校验", async () => {
   assert.equal((await badPath.json()).code, "E_TASK_ARGUMENT");
 });
 
-test("任务生命周期：启动 inference --check → 运行 → 成功 → 日志可读", async () => {
+test("任务生命周期：启动轻量仿真 → 运行 → 成功 → 日志可读", async () => {
   const create = await fetch(`${BASE}/api/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      script: "experiments/inference.py",
-      args: ["--check"],
+      script: "experiments/embodied/sim.py",
+      args: ["--demo"],
       label: "api-test-check",
     }),
   });
@@ -174,18 +174,22 @@ test("任务生命周期：启动 inference --check → 运行 → 成功 → �
     await new Promise((r) => setTimeout(r, 200));
   }
   assert.equal(task.status, "succeeded");
-  assert.match(task.log, /Dependency check passed/);
+  assert.match(task.log, /finalError=/);
   assert.ok(task.elapsedMs >= 0);
   const list = await fetch(`${BASE}/api/tasks`);
   const { tasks } = await list.json();
   assert.ok(tasks.some((t) => t.id === id));
 });
 
-test("任务取消：排队/运行中的任务可取消（终态轮询）", async () => {
+test("任务取消：排队/运行中的轻量数据任务可取消（终态轮询）", async () => {
   const create = await fetch(`${BASE}/api/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ script: "experiments/inference.py", args: ["--check"], label: "cancel-test" }),
+    body: JSON.stringify({
+      script: "experiments/embodied/collect.py",
+      args: ["--episodes", "500", "--out", "cancel-test.jsonl"],
+      label: "cancel-test",
+    }),
   });
   const { id } = await create.json();
   const cancel = await fetch(`${BASE}/api/tasks/${id}/cancel`, { method: "POST" });
@@ -202,9 +206,23 @@ test("任务取消：排队/运行中的任务可取消（终态轮询）", asyn
   const next = await fetch(`${BASE}/api/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ script: "experiments/inference.py", args: ["--check"], label: "after-cancel" }),
+    body: JSON.stringify({
+      script: "experiments/embodied/sim.py",
+      args: ["--demo"],
+      label: "after-cancel",
+    }),
   });
   assert.equal(next.status, 200);
+  const { id: nextId } = await next.json();
+  let nextTask;
+  for (let i = 0; i < 60; i++) {
+    nextTask = await (await fetch(`${BASE}/api/tasks/${nextId}`)).json();
+    if (["succeeded", "failed", "cancelled", "timeout"].includes(nextTask.status)) {
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.equal(nextTask.status, "succeeded");
 });
 
 test("未知 API 返回 404 JSON", async () => {
