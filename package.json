@@ -10,10 +10,16 @@
     "build:site": "node scripts/build-static-site.mjs",
     "verify:release": "node scripts/verify-release.mjs dist",
     "test": "node --test \"tests/**/*.test.js\"",
+    "e2e": "playwright test",
+    "e2e:static": "playwright test --project=static",
+    "e2e:install": "playwright install chromium",
     "check": "node check-frontend.mjs && node --check app.js && node --check server/index.js && node --check server/src/util.js && node --check server/src/llm.js && node --check server/src/tasks.js && node --check server/src/accounts.js && node --check server/src/rag.js",
     "pycheck": "python -m py_compile experiments/inference.py experiments/rag_embed.py experiments/basics/train_eval.py experiments/embodied/sim.py experiments/embodied/collect.py experiments/embodied/bc_train.py experiments/embodied/evaluate.py"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1"
   }
 }
