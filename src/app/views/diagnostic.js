@@ -96,6 +96,7 @@ export function render() {
     <button class="primary" type="submit">保存并查看推荐起点 ${icon("arrow")}</button>
     <button class="secondary" type="button" data-action="diag-skip">跳过，直接浏览课程</button>
   </div>
+  <p id="diag-save-status" class="error-inline" role="alert" hidden></p>
 </form>
 ${s.diagnostic.completed ? `<div class="panel">${recommendation(s)}</div>` : ""}`;
 }
@@ -130,8 +131,15 @@ export function bind(root) {
       if (v && v !== "skip") answers[q.id] = v;
     }
     const goal = data.get("goal");
-    S.saveDiagnostic(answers);
-    if (goal && goal !== S.getState().goal) S.setGoal(goal);
+    const result = S.saveDiagnostic(answers, goal);
+    if (!result.ok) {
+      const status = form.querySelector("#diag-save-status");
+      if (status) {
+        status.hidden = false;
+        status.textContent = "诊断未保存：浏览器存储不可用或空间不足。选项仍保留在此页，请重试或先导出备份。";
+      }
+      return;
+    }
     import("../ui.js").then(({ toast }) => toast("诊断已保存，起点推荐已更新"));
     go("home");
   });

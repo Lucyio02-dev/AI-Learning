@@ -1,7 +1,7 @@
 // 资料与笔记库：独立笔记（标签/检索/关联/版本恢复）+ 资料筛选（类型/方向/收藏）
 // + PDF 页码锚点 + 视频时间锚点 + 明确的上传边界说明。
 import * as S from "../state.js";
-import { esc, icon, button, details, sectionHead, pill, fmtTime } from "../ui.js";
+import { esc, icon, button, details, sectionHead, pill, fmtTime, setSaveStatus } from "../ui.js";
 import { courses, tracks, courseSearchEntries } from "../../content/index.js";
 import { go } from "../router.js";
 
@@ -90,7 +90,7 @@ function editorHtml(note, s) {
     <input id="note-tags" value="${esc((note.tags || []).join(" "))}">
     <label for="note-body">笔记正文 · Markdown（支持 \`代码\`、**粗体**、[链接](url)）</label>
     <textarea id="note-body" rows="12" placeholder="写下预测、观察、结论和仍需验证的问题…">${esc(note.body || "")}</textarea>
-    <small id="draft-status">自动保存 · 最后更新 ${fmtTime(note.updatedAt)}</small>
+    <small id="draft-status" role="status" aria-live="polite">输入后自动保存 · 最后更新 ${fmtTime(note.updatedAt)}</small>
     <div class="note-links">
       <strong>关联</strong>
       ${note.links?.course?.length ? note.links.course.map((c) => `<button class="text-button" data-goto-course="${esc(c)}">${esc(c)} ↗</button>`).join("") : '<span class="muted">未关联课程</span>'}
@@ -188,8 +188,9 @@ export function bind(root) {
 
   root.querySelector('[data-action="new-note"]')?.addEventListener("click", () => {
     const id = `note-${Date.now()}`;
-    S.saveNote(id, { title: "新的探索笔记", body: "", tags: [] });
+    const result = S.saveNote(id, { title: "新的探索笔记", body: "", tags: [] }, { silent: true });
     go("library", id);
+    if (!result.ok) import("../ui.js").then(({ toast }) => toast("笔记已在当前页面创建，但没有写入浏览器；请重试保存或导出备份。"));
   });
   root.querySelector('[data-action="export-note"]')?.addEventListener("click", () => {
     const n = S.getState().notes[noteId];
@@ -200,22 +201,30 @@ export function bind(root) {
     const n = S.getState().notes[noteId];
     if (!n) return;
     if (!confirm(`删除笔记“${n.title}”？此操作不可撤销（建议先导出）。`)) return;
-    S.deleteNote(noteId);
+    const result = S.deleteNote(noteId);
+    if (!result.ok) {
+      import("../ui.js").then(({ toast }) => toast("删除未能写入浏览器，请重试或先导出备份。"));
+      return;
+    }
     go("library");
   });
   root.querySelector('[data-action="link-current-run"]')?.addEventListener("click", () => {
     const lastRun = S.getState().runs.at(-1);
     if (!lastRun) return import("../ui.js").then(({ toast }) => toast("还没有实验记录可关联"));
-    S.saveNote(noteId, { links: { course: courses.find((c) => c.id === noteId) ? [noteId] : [], resource: [], lab: [lastRun.lab], run: [lastRun.id] } });
-    import("../ui.js").then(({ toast }) => toast("已关联最近一次实验记录"));
-    rerender();
+    const result = S.saveNote(noteId, { links: { course: courses.find((c) => c.id === noteId) ? [noteId] : [], resource: [], lab: [lastRun.lab], run: [lastRun.id] } }, { silent: true });
+    import("../ui.js").then(({ toast }) => toast(result.ok ? "已关联最近一次实验记录" : "关联未保存，请重试或导出备份。"));
+    if (result.ok) rerender();
   });
   root.querySelectorAll("[data-action=restore-revision]").forEach((btn) =>
     btn.addEventListener("click", () => {
       const n = S.getState().notes[noteId];
       const rev = (n.revisions || []).find((r) => r.at === btn.dataset.at);
       if (!rev) return;
-      S.saveNote(noteId, { body: rev.body });
+      const result = S.saveNote(noteId, { body: rev.body }, { silent: true });
+      if (!result.ok) {
+        import("../ui.js").then(({ toast }) => toast("恢复的版本未写入浏览器，当前编辑内容仍在；请重试或导出备份。"));
+        return;
+      }
       rerender();
       import("../ui.js").then(({ toast }) => toast("已恢复到所选版本（当前版本进入历史）"));
     }),
@@ -228,16 +237,16 @@ export function bind(root) {
   const tags = root.querySelector("#note-tags");
   const body = root.querySelector("#note-body");
   const persistNote = () => {
-    if (!noteId) return;
+    if (!noteId) return { ok: false };
     const existing = S.getState().notes[noteId];
-    S.saveNote(noteId, {
+    const result = S.saveNote(noteId, {
       title: title?.value || existing?.title || "未命名笔记",
       tags: (tags?.value || "").split(/[\s,，]+/).filter(Boolean),
       body: body?.value ?? existing?.body ?? "",
       links: existing?.links || { course: courses.find((c) => c.id === noteId) ? [noteId] : [], resource: [], lab: [], run: [] },
-    });
-    const status = root.querySelector("#draft-status");
-    if (status) status.textContent = "自动保存 · " + new Date().toLocaleTimeString("zh-CN");
+    }, { silent: true });
+    setSaveStatus(root.querySelector("#draft-status"), result, { okText: "自动保存", retry: persistNote });
+    return result;
   };
   [title, tags, body].forEach((el) => el?.addEventListener("input", persistNote));
 

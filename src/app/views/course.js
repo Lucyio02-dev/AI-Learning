@@ -1,7 +1,7 @@
 // 课程页：四步模板完整渲染（公式/代码/预期/陷阱/修改任务/诊断/验证）+
 // 三层深度 + 能力评价题 + 笔记草稿 + 资源引用。
 import * as S from "../state.js";
-import { esc, icon, sectionHead, details, md, button } from "../ui.js";
+import { esc, icon, sectionHead, details, md, button, setSaveStatus } from "../ui.js";
 import { go } from "../router.js";
 import { getCourse, tracks, getSections, labInfo, openSourceCasesForCourse } from "../../content/index.js";
 
@@ -72,7 +72,7 @@ export function render(route) {
     <h3>留下一点自己的理解</h3>
     <label for="lesson-note">预测、证据与疑问</label>
     <textarea id="lesson-note" data-note="${c.id}" placeholder="我原先以为…&#10;观察到…&#10;因此我认为…&#10;还需要验证…">${esc(s.notes[c.id]?.body || "")}</textarea>
-    <small id="draft-status">自动保存到此浏览器</small>
+    <small id="draft-status" role="status" aria-live="polite">输入后自动保存到此浏览器</small>
     <p>写下猜测也有价值。能力验证请在实验与评价题中完成。</p>
     <button class="text-button" data-page="tutor" data-context="${c.id}">问 AI 助教这道课的问题 ↗</button>
   </aside>
@@ -169,7 +169,11 @@ export function bind(root) {
     }),
   );
   root.querySelector('[data-action="read"]')?.addEventListener("click", (e) => {
-    S.markRead(e.currentTarget.dataset.id);
+    const result = S.markRead(e.currentTarget.dataset.id);
+    if (!result.ok) {
+      import("../ui.js").then(({ toast }) => toast("阅读状态未保存，请重试或先导出备份。"));
+      return;
+    }
     e.currentTarget.textContent = "已记录阅读";
     import("../ui.js").then(({ toast }) => toast("阅读已记录。动手实验与评价题可以继续留下能力证据。"));
   });
@@ -180,12 +184,18 @@ export function bind(root) {
     go("tutor", e.currentTarget.dataset.context || ""),
   );
   const note = root.querySelector("#lesson-note");
-  note?.addEventListener("input", () => {
+  const persistDraft = () => {
+    if (!note) return { ok: false };
     const id = note.dataset.note;
-    S.saveNote(id, { body: note.value, title: S.getState().notes[id]?.title || getCourse(id)?.title || id, links: { course: [id], resource: [], lab: [], run: [] } });
-    const status = root.querySelector("#draft-status");
-    if (status) status.textContent = "草稿已保存 · " + new Date().toLocaleTimeString("zh-CN");
-  });
+    const result = S.saveNote(id, {
+      body: note.value,
+      title: S.getState().notes[id]?.title || getCourse(id)?.title || id,
+      links: { course: [id], resource: [], lab: [], run: [] },
+    }, { silent: true });
+    setSaveStatus(root.querySelector("#draft-status"), result, { okText: "草稿已保存", retry: persistDraft });
+    return result;
+  };
+  note?.addEventListener("input", persistDraft);
   root.querySelector('[data-action="copy-feedback"]')?.addEventListener("click", (e) => {
     const text = e.currentTarget.closest(".fold")?.querySelector(".feedback-draft")?.value || "";
     navigator.clipboard?.writeText(text).then(
@@ -228,8 +238,18 @@ function bindQuiz(root) {
       };
       record.rubric = [...card.querySelectorAll(".quiz-rubric input[type=checkbox]")].map((input) => input.checked);
       record.score = { rubricSelf: record.rubric.filter(Boolean).length, rubricTotal: record.rubric.length, checked: "self-assessment" };
-      S.update((s) => s.quizAttempts.push(record), { silent: true });
-      resultEl.innerHTML = `<div class="feedback"><strong>作答已保存，自评 ${record.score.rubricSelf}/${record.score.rubricTotal}</strong><p>这只是自评记录，不会自动标记为能力通过。可以让助教按量规点评，或在“能力评价”页复核。</p></div>`;
+      const persistAttempt = () => {
+        const result = S.update((s) => {
+          if (!s.quizAttempts.some((item) => item.id === record.id)) s.quizAttempts.push(record);
+        }, { silent: true });
+        if (!result.ok) {
+          resultEl.innerHTML = '<div class="feedback save-error" role="alert"><strong>作答未保存</strong><p>存储不可用或空间不足；内容仍在此页，刷新会丢失。</p><button class="text-button" type="button" data-action="retry-save">重试保存</button><button class="text-button" type="button" data-action="backup">导出备份</button></div>';
+          resultEl.querySelector('[data-action="retry-save"]')?.addEventListener("click", persistAttempt);
+          return;
+        }
+        resultEl.innerHTML = `<div class="feedback"><strong>作答已保存，自评 ${record.score.rubricSelf}/${record.score.rubricTotal}</strong><p>这只是一条自评记录，不会自动标记为能力通过。可以让助教按量规点评，或在“能力评价”页复核。</p></div>`;
+      };
+      persistAttempt();
     }),
   );
   root.querySelectorAll('[data-action="quiz-tutor"]').forEach((btn) =>

@@ -11,6 +11,8 @@ import {
 } from "../src/core/store.js";
 import { AppError, isCode } from "../src/core/errors.js";
 import * as AppState from "../src/app/state.js";
+import { stageEvidence, stageEvidenceNote } from "../src/app/evidence.js";
+import { projectArchiveMarkdown } from "../src/app/views/projects.js";
 import { courses, getCourse, validateContent, getSections, projects, labInfo, openSourceCases, openSourceCasesForCourse, courseSearchEntries } from "../src/content/index.js";
 import { retrieve, chunkDocument, evalSet, retrievalHit, gradeAnswer, corpus } from "../src/labs/term.js";
 import { promptDemo, buildVariants, checkJson, evaluateAnswer, aggregate } from "../src/labs/prompt.js";
@@ -206,6 +208,63 @@ test("导入在本机恢复备份成功前中止，不覆盖当前状态", () =>
     if (priorStorage === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = priorStorage;
   }
+});
+
+test("保存失败不冒充成功，编辑内容保留且可重试写入", () => {
+  const priorStorage = globalThis.localStorage;
+  const values = new Map();
+  let failWrites = true;
+  const fakeStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => {
+      if (failWrites) throw new Error("Quota");
+      values.set(key, String(value));
+    },
+    removeItem: (key) => values.delete(key),
+  };
+  globalThis.localStorage = fakeStorage;
+  try {
+    AppState.init();
+    const failed = AppState.saveNote("draft", { title: "未保存草稿", body: "刷新前不能丢" }, { silent: true });
+    assert.equal(failed.ok, false);
+    assert.equal(AppState.getState().notes.draft.body, "刷新前不能丢");
+    assert.equal(values.has(KEY), false);
+
+    failWrites = false;
+    const retried = AppState.saveNote("draft", { body: "重试后写入" }, { silent: true });
+    assert.equal(retried.ok, true);
+    assert.equal(values.has(KEY), true);
+    assert.match(values.get(KEY), /重试后写入/);
+
+    failWrites = true;
+    const run = AppState.recordRun({ lab: "rag", summary: "未落盘运行" });
+    assert.equal(run.ok, false);
+    assert.equal(AppState.getState().runs.at(-1).id, run.run.id);
+  } finally {
+    if (priorStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = priorStorage;
+  }
+});
+
+test("项目阶段区分自报、程序检查与人工复核，不把勾选写成验收通过", () => {
+  const legacy = stageEvidence({ done: true });
+  assert.equal(legacy.source, "self-report");
+  assert.equal(legacy.verified, false);
+  assert.equal(legacy.legacy, true);
+  assert.match(stageEvidenceNote({ done: true }), /自报处理/);
+
+  const checked = stageEvidence({ done: true, source: "program-check" });
+  assert.equal(checked.label, "程序检查通过");
+  assert.equal(checked.verified, true);
+
+  const reviewed = stageEvidence({ done: true, source: "manual-review" });
+  assert.equal(reviewed.verified, true);
+
+  const project = projects[0];
+  const md = projectArchiveMarkdown(project, { report: "报告正文", stages: { [project.stages[0].id]: { done: true, source: "self-report", updatedAt: "2026-11-18T00:00:00.000Z" } } }, []);
+  assert.match(md, /阶段证据：自报完成/);
+  assert.match(md, /不等同程序检查或人工复核/);
+  assert.doesNotMatch(md, /验收：通过/);
 });
 
 test("稳定 ID 与运行记录归一化", () => {

@@ -32,11 +32,15 @@ export function notify() {
 }
 
 export function save() {
-  if (readOnly) return false;
+  if (readOnly) {
+    import("./ui.js").then(({ toast }) =>
+      toast("当前是只读恢复模式，未写入浏览器。请先导出原始恢复副本，再重新载入。"));
+    return false;
+  }
   const ok = persist(localStorage, state);
   if (!ok) {
     import("./ui.js").then(({ toast }) =>
-      toast("浏览器存储不可用或空间不足，请立即导出备份。"));
+      toast("浏览器存储不可用或空间不足，内容尚未保存。请立即导出备份。"));
   }
   return ok;
 }
@@ -62,8 +66,8 @@ export function recordRun(run) {
     const overflow = state.runs.length - RUN_CAP;
     state.archive.push(...state.runs.splice(0, overflow));
   }
-  save();
-  return r;
+  const ok = save();
+  return { run: r, ok };
 }
 
 // 进度状态：区分已读/自报/练习通过/实验通过/复核。
@@ -77,7 +81,7 @@ export function progressFor(courseId) {
 }
 
 export function markRead(courseId) {
-  update((s) => {
+  return update((s) => {
     const p = (s.progress[courseId] ||= {});
     p.read = true;
     p.updatedAt = new Date().toISOString();
@@ -134,8 +138,8 @@ export function nextTask() {
 }
 
 // 笔记。
-export function saveNote(noteId, patch) {
-  update((s) => {
+export function saveNote(noteId, patch, { silent = false } = {}) {
+  return update((s) => {
     const existing = s.notes[noteId] || { id: noteId, title: "未命名笔记", body: "", tags: [], links: { course: [], resource: [], lab: [], run: [] }, revisions: [] };
     const next = {
       ...existing,
@@ -147,10 +151,10 @@ export function saveNote(noteId, patch) {
       next.revisions = [...(existing.revisions || []).slice(-9), { at: existing.updatedAt, body: existing.body }];
     }
     s.notes[noteId] = next;
-  });
+  }, { silent });
 }
 export function deleteNote(noteId) {
-  update((s) => { delete s.notes[noteId]; });
+  return update((s) => { delete s.notes[noteId]; });
 }
 
 // 资源状态。
@@ -214,15 +218,16 @@ export function exportAll() {
 }
 
 export function setGoal(goal) {
-  update((s) => { s.goal = goal; });
+  return update((s) => { s.goal = goal; });
 }
-export function saveDiagnostic(answers) {
-  update((s) => {
+export function saveDiagnostic(answers, goal = "") {
+  return update((s) => {
     s.diagnostic = {
       completed: true,
       answers,
       completedAt: new Date().toISOString(),
     };
+    if (["llm", "embodied", "research"].includes(goal)) s.goal = goal;
   });
 }
 
