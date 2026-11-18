@@ -8,7 +8,7 @@
 | --- | --- |
 | 正式网址 | <https://lucyio02-dev.github.io/AI-Learning/> |
 | 线上版本 | `3.1.0`（未提升 schema，仍为 v3） |
-| 本轮发布代码基线 | `721b8207f655475715c497882ab40dd2d1508148`（PR #4–#8 全部合并后的 `main`） |
+| 本轮发布代码基线 | `0c4b11cc59878d6495d1432cd3b8f3ee7a911858`（PR #4–#8 加一次后端缺陷修复后的 `main`） |
 | 线上能力 | GitHub Pages 静态学习：课程、笔记、诊断、地图、资料、规则实验、浏览器仿真 |
 | 线上不提供 | 公网模型、真实 embedding、Python 任务、账户同步（需 H01–H03 的计算服务） |
 
@@ -34,7 +34,7 @@ curl -s https://lucyio02-dev.github.io/AI-Learning/release.json
 
 ```text
 npm run check          checked 38 frontend modules
-npm test               57 passed, 0 failed
+npm test               58 passed, 0 failed
 npm run pycheck        passed
 npm run e2e            8 passed
 npm run build:site     dist built
@@ -44,10 +44,19 @@ npm run verify:release Release OK
 ### 远程与线上结果
 
 - 五个堆叠分支的 `Validate learning lab` 全部 `success`（首次在 CI 中运行 Playwright 套件）。
-- `Deploy static site to GitHub Pages` 在 `721b820` 上 `success`；更早的中间提交有一次被 Pages 并发策略取消，不影响最终状态。
-- 线上核对：`release.json.commit` = `721b820…`，`index.html` 指向 `releases/3.1.0-2359412d098f`，入口与 `src/app/*.js`（含本轮新增的 `evidence.js`、`history.js`、`project-runs.js`）全部 200。
+- 后续两次直接推送（文档更新 `91b6f3e`、后端修复 `0c4b11c`）中，`91b6f3e` 的校验因上面那条缺陷失败并如实留在历史里；修复后 `0c4b11c` 的校验与部署均为 `success`。
+- 线上核对：`release.json.commit` = `0c4b11c…`，`index.html` 指向 `releases/3.1.0-2359412d098f`（前端资源未变，故目录名不变），入口与 `src/app/*.js`（含本轮新增的 `evidence.js`、`history.js`、`project-runs.js`）全部 200。
 - 线上浏览器冒烟：首页、课程页、实验室、项目页、设置页均正常渲染；实验室历史区出现本轮新增的检索/筛选控件；项目页出现“证据/关联”区。
 - 唯一的 404 是浏览器探测 `/api/health`，这是静态模式的预期结果（前端已有降级提示），不是缺陷。
+
+### CI 抓到并修复的真实缺陷
+
+第一次在远程 CI 跑 E2E 时，`[full] 完整模式缺少训练数据时明确失败` 偶发红：任务提交后界面一直停在 `running`（重试时是 `queued`）。本地复现后确认不是测试不稳，而是 `server/src/tasks.js` 的真实缺陷：
+
+- `spawn("python", …)` 失败（例如 `python` 不在 `PATH`）只会在 `ChildProcess` 上抛 `error` 事件，原实现没有任何监听 → 未处理事件直接终止服务进程；
+- 即使补上监听，挂在 `await` 之后也来不及，事件在下一个 tick 就已发出。
+
+改为 `spawn` 之后立即挂 `close`/`error` 并等待同一个 outcome，任务因此必有唯一终态；`pump()` 同时兜住启动阶段异常，避免任务永久停在 `queued`。新增回归：`PATH` 指向空目录启动独立服务，断言两个任务都进入 `failed` 且队列被释放（`npm test` 58 例）。
 
 测试数量只是本次证据，不写死为永久验收标准。任何后续改动都必须重新运行对应范围。
 
