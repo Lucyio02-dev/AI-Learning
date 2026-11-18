@@ -34,8 +34,9 @@ node scripts/link-check.mjs   # 课程外链可达性（建议每月）
 
 ## 升级与回滚
 
-- 静态站点无构建：`git pull` 即完成升级；旧 service worker 已退役脚本化，不会缓存旧代码。
-- 后端升级：停进程 → `git pull` → `npm run check && npm test` → 启动。回滚 = `git checkout <旧tag>` + 数据目录不动。
+- 静态站点由 `npm run build:site` 生成 `dist/`；GitHub Pages 必须先通过完整校验再构建和部署。详细步骤、版本核对与回滚见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+- 回滚重新部署已验证的 `v<version>` 标签，或提交恢复 PR；不要直接修改线上 `dist/`。旧 service worker 已退役脚本化，升级不清除学习数据。
+- 后端升级：停进程 → `git pull` → `npm run check && npm test` → 启动。回滚 = `git checkout <旧tag>`，`server/data/` 数据目录保持不动并先做备份。
 - 数据库式数据（server/data）向前兼容：schema 字段只增不改语义。
 
 ## 已知限制（如实）

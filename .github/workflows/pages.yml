@@ -8,18 +8,18 @@ name: Deploy static site to GitHub Pages
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # 同一提交先跑完整校验；校验工作流复用于 PR，避免两套检查规则漂移。
+  verify:
+    uses: ./.github/workflows/check.yml
+
+  build:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,6 +34,9 @@ jobs:
       - name: Build static site
         run: npm run build:site
 
+      - name: Verify release metadata and asset directory
+        run: npm run verify:release
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
@@ -42,6 +45,16 @@ jobs:
         with:
           path: dist
 
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
