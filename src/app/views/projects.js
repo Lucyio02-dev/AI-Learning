@@ -1,8 +1,11 @@
 // 项目空间：阶段任务、可展开提示、验收标准、报告草稿、运行证据关联、导出。
 import * as S from "../state.js";
-import { esc, icon, button, details, sectionHead, setSaveStatus } from "../ui.js";
-import { projects, getProject, getOpenSourceCase } from "../../content/index.js";
+import { esc, icon, button, details, sectionHead, setSaveStatus, fmtTime } from "../ui.js";
+import { projects, getProject, getOpenSourceCase, labInfo } from "../../content/index.js";
 import { stageEvidence, stageEvidenceNote } from "../evidence.js";
+import {
+  allProjectRuns, linkedRunsForProject, runCandidatesForProject, suggestedRunsForProject,
+} from "../project-runs.js";
 import { go } from "../router.js";
 
 export function render(route) {
@@ -40,7 +43,10 @@ function projectCard(p, s) {
 
 function renderProject(p, s) {
   const data = s.projects[p.id] || { stages: {}, report: "", linkedRunIds: [] };
-  const linkedRuns = runsForProject(p.id, s.runs);
+  const allRuns = allProjectRuns(s.runs, s.archive);
+  const linkInfo = linkedRunsForProject(data, allRuns);
+  const suggested = suggestedRunsForProject(p.id, allRuns);
+  const hasWork = !!data.report || Object.keys(data.stages || {}).length > 0;
   return `
 <button class="text-button back" data-page="projects">← 返回项目空间</button>
 <div class="page-heading"><div><span class="eyebrow">${esc(p.tag)}</span><h1>${esc(p.title)}</h1><p>${esc(p.summary)}</p></div></div>
@@ -54,10 +60,20 @@ ${projectReferences(p)}
   <label for="report-body">报告正文（Markdown）</label>
   <textarea id="report-body" data-report="${p.id}" placeholder="${esc(p.questions.join("\n"))}">${esc(data.report || "")}</textarea>
   <small id="draft-status" role="status" aria-live="polite">输入后自动保存到此浏览器</small>
-  <h3>关联实验记录（${linkedRuns.length}）</h3>
-  ${linkedRuns.length
-    ? `<ul class="text-list">${linkedRuns.slice(-10).reverse().map((r) => `<li><small class="muted">${esc(r.time.slice(0, 16).replace("T", " "))}</small> ${esc(r.summary || "")}</li>`).join("")}</ul>`
-    : '<p class="muted">还没有关联实验。完成实验室里的运行后自动出现在这里。</p>'}
+  <h3>关联实验记录 <span class="muted">${linkInfo.runs.length} 条显式关联 · 活跃与归档同等保留</span></h3>
+  ${linkInfo.missing.length ? `<div class="callout warn"><strong>有 ${linkInfo.missing.length} 条关联记录找不到</strong><p>可能来自损坏或被替换的旧备份：${linkInfo.missing.map((id) => `<code>${esc(id)}</code>`).join("、")}。导出时会保留缺失 ID，供你核对来源。</p></div>` : ""}
+  ${linkInfo.runs.length
+    ? `<div class="linked-run-list">${linkInfo.runs.map((run) => linkedRunRow(run)).join("")}</div>`
+    : '<p class="muted">还没有显式关联实验。请从下方选择，不会再把同类实验室的全部运行自动混入报告。</p>'}
+  ${!linkInfo.ids.length && hasWork && suggested.length ? `<div class="callout"><strong>旧版项目曾按实验室类型自动归类</strong><p>检测到 ${suggested.length} 条可能相关的记录。是否把它们转成显式关联？转换后仍可逐条解除。</p><button class="secondary" type="button" data-action="link-suggested">确认迁移 ${suggested.length} 条记录</button></div>` : ""}
+  <details class="fold" ${allRuns.length ? "" : "hidden"}>
+    <summary>添加实验记录（可选 ${allRuns.length} 条）</summary>
+    <div class="fold-body">
+      <label class="search-field">${icon("search")}<input id="run-link-search" placeholder="搜索 ID、实验、摘要、时间或证据"></label>
+      <div id="run-link-results">${runCandidateResults(data, allRuns, "", 20)}</div>
+    </div>
+  </details>
+  <small id="project-link-status" role="status" aria-live="polite"></small>
   <div class="form-actions">
     <button class="primary" data-action="export-project" data-id="${p.id}">导出项目档案</button>
     <span class="muted">阶段状态在勾选时自动保存；自报不等于验收。</span>
@@ -97,10 +113,40 @@ function projectReferences(project) {
   </section>`;
 }
 
-function runsForProject(projectId, runs) {
-  if (projectId === "robot") return runs.filter((run) => run.lab === "embodied");
-  if (projectId === "assistant") return runs.filter((run) => ["rag", "agent", "prompt"].includes(run.lab));
-  return [];
+function linkedRunRow(run) {
+  const verdict = run.passed === true ? "验证通过" : run.passed === false ? "探索记录" : "运行记录";
+  return `<details class="linked-run" data-linked-run="${esc(run.id)}">
+    <summary><span class="pill ${run.passed === true ? "success" : ""}">${verdict}</span> ${esc(labInfo[run.lab]?.title || run.lab)} <span class="muted">${fmtTime(run.time)}</span> ${esc(run.summary || "")}</summary>
+    <div class="linked-run-body">
+      ${runDetails(run)}
+      <button class="text-button" type="button" data-unlink-run="${esc(run.id)}">解除这条关联</button>
+    </div>
+  </details>`;
+}
+
+function runDetails(run) {
+  const artifacts = (run.artifacts || []).map((artifact) => {
+    const label = esc(artifact.name || artifact.path || JSON.stringify(artifact));
+    return artifact.url && /^https?:\/\//i.test(artifact.url)
+      ? `<li>${label} · <a href="${esc(artifact.url)}" target="_blank" rel="noreferrer">打开 ↗</a></li>`
+      : `<li>${label}</li>`;
+  }).join("");
+  return `<p>${esc(run.summary || "未填写摘要")}</p>
+    <p class="muted">配置：${run.config ? `<code>${esc(JSON.stringify(run.config))}</code>` : "未记录"}</p>
+    <p class="muted">指标：${run.metrics ? `<code>${esc(JSON.stringify(run.metrics))}</code>` : "未记录"}</p>
+    <p class="muted">产物：${artifacts ? `<ul>${artifacts}</ul>` : "未记录"}</p>
+    <details class="fold"><summary>查看证据</summary><pre>${esc(typeof run.evidence === "string" ? run.evidence : JSON.stringify(run.evidence, null, 2))}</pre></details>`;
+}
+
+export function runCandidateResults(projectData, allRuns, query = "", limit = 20) {
+  const page = runCandidatesForProject(projectData, allRuns, query, limit);
+  if (!page.items.length) return '<p class="muted">没有可关联的运行记录。完成一次实验后再回来。</p>';
+  return `<p class="muted">匹配 ${page.total} 条，当前显示 ${page.items.length} 条。</p>
+    <div class="run-candidate-list">${page.items.map((run) => `<div class="run-candidate">
+      <div><strong>${esc(labInfo[run.lab]?.title || run.lab)}</strong><small>${fmtTime(run.time)} · ${esc(run.summary || "未填写摘要")}</small><code>${esc(run.id)}</code></div>
+      <button class="secondary" type="button" data-link-run="${esc(run.id)}">关联</button>
+    </div>`).join("")}</div>
+    ${page.hasMore ? `<button class="text-button" type="button" data-run-more>再显示 ${Math.min(20, page.total - page.items.length)} 条</button>` : ""}`;
 }
 
 export function bind(root) {
@@ -151,19 +197,80 @@ export function bind(root) {
     return result;
   };
   report?.addEventListener("input", persistReport);
+
+  const projectId = report?.dataset.report;
+  const linkStatus = root.querySelector("#project-link-status");
+  const linkResults = root.querySelector("#run-link-results");
+  const linkState = { query: "", limit: 20 };
+  const currentAllRuns = () => {
+    const s = S.getState();
+    return allProjectRuns(s.runs, s.archive);
+  };
+  const paintCandidates = () => {
+    if (!linkResults || !projectId) return;
+    const data = S.getState().projects[projectId] || {};
+    linkResults.innerHTML = runCandidateResults(data, currentAllRuns(), linkState.query, linkState.limit);
+  };
+  const saveLinks = (nextIds) => {
+    if (!projectId) return false;
+    const result = S.update((s) => {
+      const project = (s.projects[projectId] ||= { stages: {}, report: "", linkedRunIds: [] });
+      project.linkedRunIds = [...new Set(nextIds)].slice(0, 500);
+      project.updatedAt = new Date().toISOString();
+    }, { silent: true });
+    if (!result.ok) {
+      setSaveStatus(linkStatus, result, { failureText: "项目与实验的关联没有写入浏览器", retry: () => saveLinks(nextIds) });
+      return false;
+    }
+    rerender();
+    return true;
+  };
+  const linkOne = (runId) => {
+    if (!projectId) return false;
+    const data = S.getState().projects[projectId] || {};
+    return saveLinks([...(data.linkedRunIds || []), runId]);
+  };
+  root.querySelector("#run-link-search")?.addEventListener("input", (e) => {
+    linkState.query = e.target.value;
+    linkState.limit = 20;
+    paintCandidates();
+  });
+  linkResults?.addEventListener("click", (e) => {
+    if (e.target.closest("[data-run-more]")) {
+      linkState.limit += 20;
+      paintCandidates();
+      return;
+    }
+    const link = e.target.closest("[data-link-run]");
+    if (link) linkOne(link.dataset.linkRun);
+  });
+  root.querySelectorAll("[data-unlink-run]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const runId = btn.dataset.unlinkRun;
+      const data = S.getState().projects[projectId] || {};
+      saveLinks((data.linkedRunIds || []).filter((id) => id !== runId));
+    }),
+  );
+  root.querySelector('[data-action="link-suggested"]')?.addEventListener("click", () => {
+    if (!projectId) return;
+    const suggested = suggestedRunsForProject(projectId, currentAllRuns()).map((run) => run.id);
+    saveLinks([...(S.getState().projects[projectId]?.linkedRunIds || []), ...suggested]);
+  });
+
   root.querySelector('[data-action="export-project"]')?.addEventListener("click", (e) => {
     const pid = e.currentTarget.dataset.id;
     const p = getProject(pid);
     const s = S.getState();
     const data = s.projects[pid] || {};
-    const linkedRuns = runsForProject(pid, s.runs);
+    const allRuns = allProjectRuns(s.runs, s.archive);
+    const linkInfo = linkedRunsForProject(data, allRuns);
     import("../ui.js").then(({ download }) => {
-      download(projectArchiveMarkdown(p, data, linkedRuns), `${pid}-项目档案.md`);
+      download(projectArchiveMarkdown(p, data, linkInfo.runs, linkInfo.missing), `${pid}-项目档案.md`);
     });
   });
 }
 
-export function projectArchiveMarkdown(project, data = {}, linkedRuns = []) {
+export function projectArchiveMarkdown(project, data = {}, linkedRuns = [], missingIds = []) {
   const stages = project.stages.map((stage) => {
     const saved = data.stages?.[stage.id] || {};
     const evidence = stageEvidence(saved);
@@ -177,7 +284,43 @@ export function projectArchiveMarkdown(project, data = {}, linkedRuns = []) {
 ${stage.acceptance.map((item) => `- ${item}`).join("\n")}`;
   }).join("\n\n");
   const runs = linkedRuns.length
-    ? linkedRuns.map((run) => `### ${run.lab} · ${run.time}\n\n${run.summary || ""}\n\n\`\`\`json\n${JSON.stringify(run.evidence ?? null, null, 2)}\n\`\`\``).join("\n\n")
-    : "尚未关联实验记录。";
-  return `# ${project.title}\n\n${data.report || "尚未填写报告"}\n\n## 阶段证据状态\n\n${stages}\n\n## 关联实验记录\n\n${runs}\n`;
+    ? linkedRuns.map((run) => {
+        const artifacts = (run.artifacts || []).length
+          ? run.artifacts.map((artifact) => `- ${artifact.name || artifact.path || JSON.stringify(artifact)}${artifact.url ? ` (${artifact.url})` : ""}`).join("\n")
+          : "未记录";
+        const evidence = run.evidence ?? run.evidenceText ?? null;
+        return `### ${run.lab} · ${run.time}
+
+- 记录 ID：${run.id}
+- 状态：${run.passed === true ? "验证通过" : run.passed === false ? "未通过/探索记录" : "未判定"}
+- 模式：${run.mode || "未记录"}
+- 摘要：${run.summary || "未填写"}
+
+#### 配置
+
+\`\`\`json
+${JSON.stringify(run.config ?? null, null, 2)}
+\`\`\`
+
+#### 指标
+
+\`\`\`json
+${JSON.stringify(run.metrics ?? null, null, 2)}
+\`\`\`
+
+#### 产物
+
+${artifacts}
+
+#### 证据
+
+\`\`\`json
+${JSON.stringify(evidence, null, 2)}
+\`\`\``;
+      }).join("\n\n")
+    : "尚未关联可读取的实验记录。";
+  const missing = missingIds.length
+    ? `\n\n## 关联记录缺失\n\n以下 ID 仍在项目关联中，但当前数据里找不到对应运行，导出未静默删除：\n\n${missingIds.map((id) => `- ${id}`).join("\n")}`
+    : "";
+  return `# ${project.title}\n\n${data.report || "尚未填写报告"}\n\n## 阶段证据状态\n\n${stages}\n\n## 关联实验记录\n\n${runs}${missing}\n`;
 }

@@ -12,6 +12,8 @@ import {
 import { AppError, isCode } from "../src/core/errors.js";
 import * as AppState from "../src/app/state.js";
 import { stageEvidence, stageEvidenceNote } from "../src/app/evidence.js";
+import { historyPage, combineRuns, HISTORY_PAGE_SIZE } from "../src/app/history.js";
+import { allProjectRuns, linkedRunsForProject, runCandidatesForProject } from "../src/app/project-runs.js";
 import { projectArchiveMarkdown } from "../src/app/views/projects.js";
 import { courses, getCourse, validateContent, getSections, projects, labInfo, openSourceCases, openSourceCasesForCourse, courseSearchEntries } from "../src/content/index.js";
 import { retrieve, chunkDocument, evalSet, retrievalHit, gradeAnswer, corpus } from "../src/labs/term.js";
@@ -265,6 +267,54 @@ test("项目阶段区分自报、程序检查与人工复核，不把勾选写�
   assert.match(md, /阶段证据：自报完成/);
   assert.match(md, /不等同程序检查或人工复核/);
   assert.doesNotMatch(md, /验收：通过/);
+});
+
+test("运行历史可分页检索，100 活跃 + 60 归档没有记录被隐藏", () => {
+  const active = Array.from({ length: 100 }, (_, i) => ({
+    id: `active-${String(i).padStart(3, "0")}`,
+    lab: i % 2 ? "rag" : "prompt",
+    time: `2026-02-${String((i % 28) + 1).padStart(2, "0")}T10:00:00.000Z`,
+    summary: `活跃记录 ${i}`,
+  }));
+  const archive = Array.from({ length: 60 }, (_, i) => ({
+    id: `archive-${String(i).padStart(3, "0")}`,
+    lab: "embodied",
+    time: `2025-12-${String((i % 28) + 1).padStart(2, "0")}T10:00:00.000Z`,
+    summary: `归档记录 ${i}`,
+  }));
+  const first = historyPage(active, archive, {});
+  assert.equal(first.items.length, HISTORY_PAGE_SIZE);
+  assert.equal(first.total, 160);
+  assert.equal(first.hasMore, true);
+  assert.equal(historyPage(active, archive, { limit: 40 }).items.length, 40);
+  assert.equal(historyPage(active, archive, { scope: "archive" }).total, 60);
+  assert.equal(historyPage(active, archive, { query: "归档记录 59" }).total, 1);
+  assert.equal(historyPage(active, archive, { lab: "embodied" }).total, 60);
+  assert.equal(combineRuns(active, archive).length, 160);
+});
+
+test("项目显式关联跨越活跃与归档，导出保留配置、指标、产物与缺失 ID", () => {
+  const active = [{ id: "run-live", lab: "rag", time: "2026-02-01T00:00:00Z", summary: "活跃证据", passed: true, config: { k: 3 }, metrics: { hit: 0.8 }, artifacts: [{ name: "result.json", url: "https://example.test/result.json" }], evidence: { answer: "ok" } }];
+  const archive = [{ id: "run-old", lab: "embodied", time: "2025-12-01T00:00:00Z", summary: "归档证据", passed: false, config: { seed: 7 }, metrics: { success: 0.4 }, artifacts: [{ name: "log.txt" }], evidence: { fault: "occlusion" } }];
+  const data = { report: "报告", linkedRunIds: ["run-live", "run-old", "run-missing"] };
+  const all = allProjectRuns(active, archive);
+  const linked = linkedRunsForProject(data, all);
+  assert.deepEqual(linked.runs.map((run) => run.id), ["run-live", "run-old"]);
+  assert.deepEqual(linked.missing, ["run-missing"]);
+
+  const afterArchive = linkedRunsForProject(data, allProjectRuns([], [...active, ...archive]));
+  assert.deepEqual(afterArchive.runs.map((run) => run.id), linked.runs.map((run) => run.id));
+
+  const candidates = runCandidatesForProject({ linkedRunIds: ["run-live"] }, all, "");
+  assert.deepEqual(candidates.items.map((run) => run.id), ["run-old"]);
+
+  const md = projectArchiveMarkdown(projects[0], data, linked.runs, linked.missing);
+  assert.match(md, /run-live/);
+  assert.match(md, /run-old/);
+  assert.match(md, /"hit": 0.8/);
+  assert.match(md, /result\.json/);
+  assert.match(md, /关联记录缺失/);
+  assert.match(md, /run-missing/);
 });
 
 test("稳定 ID 与运行记录归一化", () => {

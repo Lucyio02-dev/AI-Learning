@@ -1163,6 +1163,77 @@ summary > .muted {
 }
 .history h2 > .muted {
   margin-left: 15px;
+  float: none;
+}
+.history-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 18px 0;
+}
+.history-controls label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: #657657;
+}
+.history-controls .search-field {
+  flex: 1 1 280px;
+  margin: 0;
+}
+.history-controls select {
+  min-width: 155px;
+}
+.history-count {
+  font-size: 12px;
+  color: #77866e;
+}
+.history-row {
+  margin: 10px 0;
+}
+.linked-run-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+.linked-run {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fbfcf8;
+}
+.linked-run summary {
+  cursor: pointer;
+}
+.linked-run-body {
+  padding-top: 10px;
+}
+.run-candidate-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.run-candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.run-candidate div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.run-candidate small,
+.run-candidate code {
+  overflow-wrap: anywhere;
+}
+.run-candidate code {
+  color: #87937d;
+  font-size: 11px;
 }
 .project-grid {
   display: grid;

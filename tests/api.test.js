@@ -181,28 +181,43 @@ test("任务生命周期：启动轻量仿真 → 运行 → 成功 → 日志�
   assert.ok(tasks.some((t) => t.id === id));
 });
 
-test("任务取消：排队/运行中的轻量数据任务可取消（终态轮询）", async () => {
-  const create = await fetch(`${BASE}/api/tasks`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      script: "experiments/embodied/collect.py",
-      args: ["--episodes", "500", "--out", "cancel-test.jsonl"],
-      label: "cancel-test",
-    }),
-  });
-  const { id } = await create.json();
-  const cancel = await fetch(`${BASE}/api/tasks/${id}/cancel`, { method: "POST" });
+test("任务取消：排队任务稳定取消并释放并发", async () => {
+  const createTask = async (args, label) => {
+    const response = await fetch(`${BASE}/api/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ script: "experiments/embodied/collect.py", args, label }),
+    });
+    assert.equal(response.status, 200);
+    return (await response.json()).id;
+  };
+  const blockerId = await createTask(["--episodes", "500", "--out", "cancel-blocker.jsonl"], "cancel-blocker");
+  // 等阻塞任务真正运行时，下一个任务必然进入排队态，避免“任务恰好已完成”的竞态。
+  let blocker;
+  for (let i = 0; i < 40; i++) {
+    blocker = await (await fetch(`${BASE}/api/tasks/${blockerId}`)).json();
+    if (blocker.status === "running") break;
+    if (["succeeded", "failed", "cancelled", "timeout"].includes(blocker.status)) break;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.equal(blocker.status, "running", `阻塞任务未进入运行态：${blocker.status}`);
+
+  const targetId = await createTask(["--episodes", "500", "--out", "cancel-target.jsonl"], "cancel-target");
+  const cancel = await fetch(`${BASE}/api/tasks/${targetId}/cancel`, { method: "POST" });
   assert.equal(cancel.status, 200);
+  const cancelled = await cancel.json();
+  assert.equal(cancelled.status, "cancelled");
+
+  // 清理阻塞任务，随后确认队列已释放。
+  assert.equal((await fetch(`${BASE}/api/tasks/${blockerId}/cancel`, { method: "POST" })).status, 200);
   let task;
   for (let i = 0; i < 60; i++) {
-    const detail = await (await fetch(`${BASE}/api/tasks/${id}`)).json();
-    task = detail;
-    if (["cancelled", "succeeded", "failed", "timeout"].includes(detail.status)) break;
-    await new Promise((r) => setTimeout(r, 150));
+    task = await (await fetch(`${BASE}/api/tasks/${targetId}`)).json();
+    if (["cancelled", "succeeded", "failed", "timeout"].includes(task.status)) break;
+    await new Promise((r) => setTimeout(r, 100));
   }
   assert.equal(task.status, "cancelled", `期望取消，实际 ${task.status}`);
-  // 取消后任务不再消耗并发：再起一个任务能正常运行
+
   const next = await fetch(`${BASE}/api/tasks`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -215,11 +230,9 @@ test("任务取消：排队/运行中的轻量数据任务可取消（终态轮�
   assert.equal(next.status, 200);
   const { id: nextId } = await next.json();
   let nextTask;
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 80; i++) {
     nextTask = await (await fetch(`${BASE}/api/tasks/${nextId}`)).json();
-    if (["succeeded", "failed", "cancelled", "timeout"].includes(nextTask.status)) {
-      break;
-    }
+    if (["succeeded", "failed", "cancelled", "timeout"].includes(nextTask.status)) break;
     await new Promise((r) => setTimeout(r, 100));
   }
   assert.equal(nextTask.status, "succeeded");
