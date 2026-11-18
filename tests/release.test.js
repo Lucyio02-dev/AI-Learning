@@ -88,6 +88,8 @@ test("旧缓存升级只刷新本应用，保留课程地址与其他应用缓�
 test("静态发布包含缓存退役脚本，全部视图与动态 import 使用同一资源版本", async () => {
   const result = spawnSync(process.execPath, ["scripts/build-static-site.mjs"], { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
+  const verified = spawnSync(process.execPath, ["scripts/verify-release.mjs", "dist"], { cwd: root, encoding: "utf8" });
+  assert.equal(verified.status, 0, verified.stderr);
   const dist = resolve(root, "dist");
   const info = JSON.parse(await readFile(resolve(dist, "release.json"), "utf8"));
   const index = await readFile(resolve(dist, "index.html"), "utf8");
@@ -118,4 +120,24 @@ test("静态发布包含缓存退役脚本，全部视图与动态 import 使用
   }
   assert.ok(visited.has(resolve(assetRoot, "src/content/open-source-cases.js")), "新增内容也必须进入发布图");
   assert.ok(visited.has(resolve(assetRoot, "src/core/store.js")), "继续使用 v3 学习数据与迁移逻辑");
+});
+
+test("发布工作流必须先校验再构建，所有托管配置只发布 dist", async () => {
+  const pages = await readFile(resolve(root, ".github/workflows/pages.yml"), "utf8");
+  const check = await readFile(resolve(root, ".github/workflows/check.yml"), "utf8");
+  assert.match(check, /workflow_call:/);
+  assert.match(pages, /verify:\s*\n\s+uses: \.\/\.github\/workflows\/check\.yml/);
+  assert.match(pages, /build:\s*\n\s+needs: verify/);
+  assert.match(pages, /deploy:\s*\n\s+needs: build/);
+  assert.match(pages, /npm run build:site/);
+  assert.match(pages, /npm run verify:release/);
+
+  const netlify = await readFile(resolve(root, "netlify.toml"), "utf8");
+  assert.match(netlify, /command = "npm run build:site"/);
+  assert.match(netlify, /publish = "dist"/);
+  assert.doesNotMatch(netlify, /publish = "\."/);
+
+  const vercel = JSON.parse(await readFile(resolve(root, "vercel.json"), "utf8"));
+  assert.equal(vercel.buildCommand, "npm run build:site");
+  assert.equal(vercel.outputDirectory, "dist");
 });

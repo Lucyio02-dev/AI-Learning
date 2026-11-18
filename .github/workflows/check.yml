@@ -3,6 +3,7 @@ on:
   pull_request:
   push:
     branches: [main, feat/learning-lab-v2]
+  workflow_call:
 jobs:
   check:
     runs-on: ubuntu-latest
