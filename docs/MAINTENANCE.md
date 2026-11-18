@@ -1,10 +1,13 @@
 # 维护指南
 
+> 线上版本、本地未发布改动与各任务证据见 [CURRENT_STATUS.md](./CURRENT_STATUS.md)。测试数量只作参考，以实际运行输出为准。
+
 ## 日常检查
 
 ```sh
 npm run check      # 语法检查（改动后必跑）
-npm test           # 47 个回归测试
+npm test           # 核心/API/内容/发布回归（数量以实际输出为准）
+npm run e2e        # 浏览器端到端；首次先 npm run e2e:install，范围见 TESTING.md
 npm run pycheck    # Python 实验语法
 node scripts/link-check.mjs   # 课程外链可达性（建议每月）
 ```
@@ -42,5 +45,5 @@ node scripts/link-check.mjs   # 课程外链可达性（建议每月）
 ## 已知限制（如实）
 
 - RAG 内置语料为 6 份校园教学材料；实验室支持粘贴自选资料并用于词项/向量检索和生成。尚无文件上传、索引管理界面；生成结果只核对引用 ID 是否存在于上下文，事实支持仍需人工阅读核验。
-- 云端公网部署、真实第二台设备联调、原教材 Notebook 逐个执行：见 `docs/ACCEPTANCE.md` 第 6 节。
+- 静态学习页已发布（GitHub Pages）；尚无完整服务的公网托管。真实第二台设备联调、原教材 Notebook 逐个执行：见 `docs/ACCEPTANCE.md` 第 6 节。
 - 2D 仿真无动力学；VLA 不承诺普通电脑实时运行。
