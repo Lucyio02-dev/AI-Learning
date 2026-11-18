@@ -10,12 +10,14 @@ export function recordRun(run) {
     (run.passed === true
       ? { diagnosed: true, verified: true }
       : { diagnosed: !!run.passed, verified: false });
-  const saved = S.recordRun({ ...run, statuses });
-  // 能力映射：诊断=诊断能力；验证需要独立验证路径（对照/gold-evidence/复核）
-  if (courseId && statuses.diagnosed) S.setCapability(courseId, "diagnosed", true, saved.id);
-  if (courseId && statuses.verified) {
-    S.setCapability(courseId, "verified", true, saved.id);
-    S.setCapability(courseId, "experimentPassed", true, saved.id);
+  const { run: saved, ok } = S.recordRun({ ...run, statuses });
+  // 只有运行记录真正写入后，才同步能力证据；否则界面不能出现“已验证”的假象。
+  if (ok) {
+    if (courseId && statuses.diagnosed) S.setCapability(courseId, "diagnosed", true, saved.id);
+    if (courseId && statuses.verified) {
+      S.setCapability(courseId, "verified", true, saved.id);
+      S.setCapability(courseId, "experimentPassed", true, saved.id);
+    }
   }
-  return saved;
+  return { ...saved, persisted: ok };
 }

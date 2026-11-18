@@ -999,11 +999,28 @@ textarea::placeholder {
   margin: 18px 0;
   line-height: 1.8;
 }
-#draft-status {
+#draft-status,
+.stage-evidence {
   display: block;
-  color: #99a28e;
-  font-size: 10px;
-  margin-top: 12px;
+  color: #77866e;
+  font-size: 12px;
+  margin-top: 10px;
+}
+#draft-status.save-error,
+.stage-evidence.save-error {
+  color: #9b3f25;
+  padding: 8px 10px;
+  border-left: 3px solid #b3562c;
+  background: #fbf1ec;
+}
+#draft-status .text-button,
+.stage-evidence .text-button {
+  margin-left: 8px;
+  color: #8b3c25;
+  font-size: 12px;
+}
+.save-error {
+  color: #9b3f25;
 }
 .experiment-info {
   display: flex;

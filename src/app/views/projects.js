@@ -1,7 +1,8 @@
 // 项目空间：阶段任务、可展开提示、验收标准、报告草稿、运行证据关联、导出。
 import * as S from "../state.js";
-import { esc, icon, button, details, sectionHead } from "../ui.js";
+import { esc, icon, button, details, sectionHead, setSaveStatus } from "../ui.js";
 import { projects, getProject, getOpenSourceCase } from "../../content/index.js";
+import { stageEvidence, stageEvidenceNote } from "../evidence.js";
 import { go } from "../router.js";
 
 export function render(route) {
@@ -25,13 +26,13 @@ ${details("查看小型复现实例（知识编辑最小复现）", `<pre>docs/R
 }
 
 function projectCard(p, s) {
-  const done = (s.projects[p.id]?.stages && Object.values(s.projects[p.id].stages).filter((x) => x.done).length) || 0;
+  const marked = Object.values(s.projects[p.id]?.stages || {}).filter((entry) => stageEvidence(entry).done).length;
   return `<article class="panel project-card">
     <span class="eyebrow">${esc(p.tag)}</span>
     <h2>${esc(p.title)}</h2>
     <p>${esc(p.summary)}</p>
     <small class="muted">运行条件：${esc(p.runConditions)}</small>
-    <div class="card-meta"><span class="pill">阶段 ${done}/${p.stages.length} 完成</span></div>
+    <div class="card-meta"><span class="pill">阶段 ${marked}/${p.stages.length} 已标记（自报）</span></div>
     <ol class="project-steps">${p.stages.map((st) => `<li><button class="text-button" data-project="${p.id}">${esc(st.title)}</button><small>${st.acceptance.length} 项验收</small></li>`).join("")}</ol>
     <div class="card-foot"><button class="primary" data-project="${p.id}">进入项目 ${icon("arrow")}</button></div>
   </article>`;
@@ -49,25 +50,27 @@ ${projectReferences(p)}
   ${p.stages.map((st, i) => stageCard(p, st, data.stages[st.id] || {}, i)).join("")}
 </div>
 <section class="panel">
-  <div class="section-title"><h2>项目报告 · 自动草稿</h2><span class="muted">报告不自动编造结果，只引用真实运行记录</span></div>
+  <div class="section-title"><h2>项目报告 · 本机草稿</h2><span class="muted">报告不自动编造结果，只引用真实运行记录</span></div>
   <label for="report-body">报告正文（Markdown）</label>
   <textarea id="report-body" data-report="${p.id}" placeholder="${esc(p.questions.join("\n"))}">${esc(data.report || "")}</textarea>
-  <small id="draft-status">自动保存到此浏览器</small>
+  <small id="draft-status" role="status" aria-live="polite">输入后自动保存到此浏览器</small>
   <h3>关联实验记录（${linkedRuns.length}）</h3>
   ${linkedRuns.length
     ? `<ul class="text-list">${linkedRuns.slice(-10).reverse().map((r) => `<li><small class="muted">${esc(r.time.slice(0, 16).replace("T", " "))}</small> ${esc(r.summary || "")}</li>`).join("")}</ul>`
     : '<p class="muted">还没有关联实验。完成实验室里的运行后自动出现在这里。</p>'}
   <div class="form-actions">
     <button class="primary" data-action="export-project" data-id="${p.id}">导出项目档案</button>
-    <button class="secondary" data-action="stage-save" data-id="${p.id}">保存阶段状态</button>
+    <span class="muted">阶段状态在勾选时自动保存；自报不等于验收。</span>
   </div>
 </section>`;
 }
 
 function stageCard(p, st, saved, i) {
   const hints = st.hints || [];
-  return `<section class="panel project-stage ${saved?.done ? "done" : ""}">
-    <div class="section-title"><h3>${esc(st.title)}</h3><label class="check-row"><input type="checkbox" data-stage-done="${p.id}/${st.id}" ${saved?.done ? "checked" : ""}> 验收通过</label></div>
+  const evidence = stageEvidence(saved);
+  return `<section class="panel project-stage ${evidence.done ? "done" : ""}">
+    <div class="section-title"><h3>${esc(st.title)}</h3><label class="check-row"><input type="checkbox" data-stage-done="${p.id}/${st.id}" ${evidence.done ? "checked" : ""}> 标记阶段自报完成</label></div>
+    <small class="stage-evidence" data-stage-status="${esc(p.id)}/${esc(st.id)}" aria-live="polite">${esc(stageEvidenceNote(saved))}</small>
     <p>${esc(st.brief)}</p>
     <h4>任务</h4>
     <ul>${st.tasks.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
@@ -108,17 +111,35 @@ export function bind(root) {
   root.querySelectorAll("[data-stage-done]").forEach((cb) =>
     cb.addEventListener("change", () => {
       const [pid, sid] = cb.dataset.stageDone.split("/");
-      S.update((s) => {
-        const updatedAt = new Date().toISOString();
-        const proj = (s.projects[pid] ||= { stages: {}, report: "", linkedRunIds: [] });
-        proj.stages[sid] = { ...(proj.stages[sid] || {}), done: cb.checked, updatedAt };
-        proj.updatedAt = updatedAt;
-      });
+      const status = cb.closest(".project-stage")?.querySelector("[data-stage-status]");
+      const persistStage = () => {
+        const result = S.update((s) => {
+          const updatedAt = new Date().toISOString();
+          const proj = (s.projects[pid] ||= { stages: {}, report: "", linkedRunIds: [] });
+          proj.stages[sid] = {
+            ...(proj.stages[sid] || {}),
+            done: cb.checked,
+            source: "self-report",
+            updatedAt,
+          };
+          proj.updatedAt = updatedAt;
+        }, { silent: true });
+        if (!result.ok) {
+          setSaveStatus(status, result, { failureText: "阶段状态没有写入浏览器", retry: persistStage });
+          return;
+        }
+        if (status) {
+          status.classList.remove("save-error");
+          status.textContent = stageEvidenceNote(S.getState().projects[pid]?.stages?.[sid]);
+        }
+      };
+      persistStage();
     }),
   );
   const report = root.querySelector("[data-report]");
-  report?.addEventListener("input", () => {
-    S.update((s) => {
+  const persistReport = () => {
+    if (!report) return { ok: false };
+    const result = S.update((s) => {
       const pid = report.dataset.report;
       const updatedAt = new Date().toISOString();
       const project = (s.projects[pid] ||= { stages: {}, report: "", linkedRunIds: [] });
@@ -126,9 +147,10 @@ export function bind(root) {
       project.reportUpdatedAt = updatedAt;
       project.updatedAt = updatedAt;
     }, { silent: true });
-    const status = root.querySelector("#draft-status");
-    if (status) status.textContent = "草稿已保存 · " + new Date().toLocaleTimeString("zh-CN");
-  });
+    setSaveStatus(root.querySelector("#draft-status"), result, { okText: "草稿已保存", retry: persistReport });
+    return result;
+  };
+  report?.addEventListener("input", persistReport);
   root.querySelector('[data-action="export-project"]')?.addEventListener("click", (e) => {
     const pid = e.currentTarget.dataset.id;
     const p = getProject(pid);
@@ -136,10 +158,26 @@ export function bind(root) {
     const data = s.projects[pid] || {};
     const linkedRuns = runsForProject(pid, s.runs);
     import("../ui.js").then(({ download }) => {
-      download(
-        `# ${p.title}\n\n${data.report || "尚未填写报告"}\n\n## 阶段完成情况\n\n${p.stages.map((st) => `### ${st.title}\n- 验收：${(data.stages?.[st.id]?.done) ? "通过" : "未标记"}\n${st.acceptance.map((a) => `  - [${(data.stages?.[st.id]?.done) ? "x" : " "}] ${a}`).join("\n")}`).join("\n\n")}\n\n## 关联实验记录\n\n${linkedRuns.map((r) => `### ${r.lab} · ${r.time}\n\n${r.summary}\n\n\`\`\`json\n${JSON.stringify(r.evidence, null, 2)}\n\`\`\``).join("\n\n")}\n`,
-        `${pid}-项目档案.md`,
-      );
+      download(projectArchiveMarkdown(p, data, linkedRuns), `${pid}-项目档案.md`);
     });
   });
+}
+
+export function projectArchiveMarkdown(project, data = {}, linkedRuns = []) {
+  const stages = project.stages.map((stage) => {
+    const saved = data.stages?.[stage.id] || {};
+    const evidence = stageEvidence(saved);
+    return `### ${stage.title}
+- 阶段证据：${evidence.label}${evidence.legacy ? "（旧记录按自报处理）" : ""}
+- 说明：${evidence.verified ? "来源已记录，仍需核对证据是否完整。" : "这是自报状态，不等同程序检查或人工复核。"}
+- 标记时间：${saved.updatedAt || "未记录"}
+
+#### 验收标准（供复核）
+
+${stage.acceptance.map((item) => `- ${item}`).join("\n")}`;
+  }).join("\n\n");
+  const runs = linkedRuns.length
+    ? linkedRuns.map((run) => `### ${run.lab} · ${run.time}\n\n${run.summary || ""}\n\n\`\`\`json\n${JSON.stringify(run.evidence ?? null, null, 2)}\n\`\`\``).join("\n\n")
+    : "尚未关联实验记录。";
+  return `# ${project.title}\n\n${data.report || "尚未填写报告"}\n\n## 阶段证据状态\n\n${stages}\n\n## 关联实验记录\n\n${runs}\n`;
 }

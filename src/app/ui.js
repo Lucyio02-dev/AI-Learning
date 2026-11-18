@@ -48,6 +48,7 @@ export const fmtTime = (iso) => {
 };
 
 export const toast = (text) => {
+  if (typeof document === "undefined") return;
   const el = document.querySelector("#toast");
   if (!el) return;
   el.textContent = text;
@@ -55,6 +56,21 @@ export const toast = (text) => {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => el.classList.remove("show"), 4200);
 };
+
+// 保存反馈只能读实际写入结果。成功才显示“已保存”；失败保留页面中的编辑内容，
+// 并提供重试与导出备份，避免刷新后才发现数据从未落盘。
+export function setSaveStatus(el, result, { okText = "草稿已保存", retry = null, failureText = "" } = {}) {
+  if (!el) return false;
+  const ok = typeof result === "boolean" ? result : !!result?.ok;
+  el.classList.toggle("save-error", !ok);
+  if (ok) {
+    el.innerHTML = `${esc(okText)} · ${new Date().toLocaleTimeString("zh-CN")}`;
+    return true;
+  }
+  el.innerHTML = `<strong>未保存</strong>${failureText ? `：${esc(failureText)}` : "：浏览器存储不可用或空间不足"}。内容仍在本页，刷新会丢失。${retry ? '<button class="text-button" type="button" data-action="retry-save">重试保存</button>' : ""}<button class="text-button" type="button" data-action="backup">导出备份</button>`;
+  if (retry) el.querySelector('[data-action="retry-save"]')?.addEventListener("click", retry);
+  return false;
+}
 
 export function download(content, name, type = "text/markdown;charset=utf-8") {
   const url = URL.createObjectURL(new Blob([content], { type }));
