@@ -181,6 +181,62 @@ test("任务生命周期：启动轻量仿真 → 运行 → 成功 → 日志�
   assert.ok(tasks.some((t) => t.id === id));
 });
 
+test("python 不可用时任务进入失败终态，不会永远停在 running 或 queued", async () => {
+  const portServer = createNetServer();
+  await new Promise((resolve) => portServer.listen(0, "127.0.0.1", resolve));
+  const port = portServer.address().port;
+  await new Promise((resolve) => portServer.close(resolve));
+  const base = `http://127.0.0.1:${port}`;
+  const isolatedDir = mkdtempSync(join(tmpdir(), "ai-learning-nopython-"));
+  const emptyPath = mkdtempSync(join(tmpdir(), "ai-learning-empty-path-"));
+  // PATH 指向空目录：子进程无法启动，覆盖 spawn 失败路径（之前没有 error 监听）。
+  const brokenServer = spawn(process.execPath, ["server/index.js"], {
+    cwd: ROOT,
+    env: { ...process.env, PORT: String(port), AI_LEARNING_DATA: isolatedDir, PATH: emptyPath, DEEPSEEK_API_KEY: "", GLM_API_KEY: "" },
+  });
+  const waitTerminal = async (id) => {
+    let task;
+    for (let i = 0; i < 50; i++) {
+      task = await (await fetch(`${base}/api/tasks/${id}`)).json();
+      if (["succeeded", "failed", "cancelled", "timeout"].includes(task.status)) return task;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return task;
+  };
+  const submit = async (label) => {
+    const response = await fetch(`${base}/api/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ script: "experiments/embodied/sim.py", args: ["--demo"], label }),
+    });
+    assert.equal(response.status, 200);
+    return (await response.json()).id;
+  };
+  try {
+    let ready = false;
+    for (let i = 0; i < 50; i++) {
+      try {
+        if ((await fetch(`${base}/api/health`)).ok) { ready = true; break; }
+      } catch {}
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal(ready, true, "无 python 的测试服务器应启动");
+
+    const first = await waitTerminal(await submit("no-python-first"));
+    assert.equal(first.status, "failed", "启动失败的任务必须落到 failed，而不是停在 running");
+    assert.match(first.error || "", /启动失败|退出码/);
+
+    // 队列必须被释放：第二个任务的结局同样是终态，而不是永久 queued。
+    const second = await waitTerminal(await submit("no-python-second"));
+    assert.equal(second.status, "failed");
+  } finally {
+    brokenServer.kill();
+    for (const dir of [isolatedDir, emptyPath]) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+});
+
 test("任务取消：排队任务稳定取消并释放并发", async () => {
   const createTask = async (args, label) => {
     const response = await fetch(`${BASE}/api/tasks`, {

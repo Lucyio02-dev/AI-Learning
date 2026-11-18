@@ -74,10 +74,19 @@ function pump() {
   while (running < MAX_CONCURRENT && queue.length) {
     const job = queue.shift();
     running++;
-    startProcess(job).finally(() => {
-      running--;
-      pump();
-    });
+    startProcess(job)
+      .catch(async (error) => {
+        // 启动阶段失败（python 不存在、工作目录不可写等）也必须落到唯一终态，
+        // 否则任务会一直停在 queued，界面与队列状态都不可信。
+        job.meta.status = "failed";
+        job.meta.error = `任务未能启动：${error.message}`;
+        job.meta.finishedAt = nowIso();
+        await saveMeta(job.taskId, job.meta).catch(() => {});
+      })
+      .finally(() => {
+        running--;
+        pump();
+      });
   }
 }
 
@@ -94,6 +103,12 @@ async function startProcess({ taskId, script, args, meta }) {
     cwd: artifactRoot,
     env: { ...process.env, PYTHONIOENCODING: "utf-8", AI_LEARNING_TASK_DIR: dir },
   });
+  // 必须紧接着 spawn 挂监听：子进程启动失败的 error 事件在下一个 tick 就发出，
+  // 放在任何 await 之后挂都会变成未处理事件并终止整个服务。
+  const outcome = new Promise((resolve) => {
+    proc.once("close", (code, signal) => resolve({ code, signal }));
+    proc.once("error", (error) => resolve({ error }));
+  });
   registry.set(taskId, { proc });
   meta.status = "running";
   meta.startedAt = nowIso();
@@ -109,39 +124,40 @@ async function startProcess({ taskId, script, args, meta }) {
     await writeFile(logPath, buf, { flag: "a" }).catch(() => {});
     meta.logBytes = logSize;
   };
-  proc.stdout.on("data", append);
-  proc.stderr.on("data", append);
+  proc.stdout?.on("data", append);
+  proc.stderr?.on("data", append);
   const timeout = setTimeout(() => {
     meta.status = "timeout";
     kill(taskId);
   }, WHITELIST[script]?.timeoutMs || 600000);
-  await new Promise((done) => {
-    proc.on("close", async (code, signal) => {
-      clearTimeout(timeout);
-      registry.delete(taskId);
-      meta.finishedAt = nowIso();
-      meta.elapsedMs = meta.startedAt ? Date.now() - new Date(meta.startedAt).getTime() : 0;
-      meta.exitCode = code;
-      meta.status =
-        meta.status === "timeout"
-          ? "timeout"
-          : meta.status === "cancelled"
-            ? "cancelled"
-            : code === 0
-              ? "succeeded"
-              : "failed";
-      if (meta.status === "failed")
-        meta.error = `退出码 ${code}；详见 run.log 末尾`;
-      try {
-        meta.artifacts = await collectArtifacts({ artifactRoot, workspaceRoot, taskId, script, args, publish: meta.status === "succeeded" });
-      } catch (error) {
-        meta.status = "failed";
-        meta.error = `任务结束但产物保存失败：${error.message}`;
-      }
-      await saveMeta(taskId, meta);
-      done();
-    });
-  });
+  const { code, signal, error: spawnError } = await outcome;
+  clearTimeout(timeout);
+  registry.delete(taskId);
+  meta.finishedAt = nowIso();
+  meta.elapsedMs = meta.startedAt ? Date.now() - new Date(meta.startedAt).getTime() : 0;
+  meta.exitCode = code;
+  meta.status = spawnError
+    ? "failed"
+    : meta.status === "timeout"
+      ? "timeout"
+      : meta.status === "cancelled"
+        ? "cancelled"
+        : code === 0
+          ? "succeeded"
+          : "failed";
+  if (meta.status === "failed")
+    meta.error = spawnError
+      ? `任务进程启动失败：${spawnError.message}`
+      : signal
+        ? `进程被信号 ${signal} 终止；详见 run.log 末尾`
+        : `退出码 ${code}；详见 run.log 末尾`;
+  try {
+    meta.artifacts = await collectArtifacts({ artifactRoot, workspaceRoot, taskId, script, args, publish: meta.status === "succeeded" });
+  } catch (error) {
+    meta.status = "failed";
+    meta.error = `任务结束但产物保存失败：${error.message}`;
+  }
+  await saveMeta(taskId, meta);
 }
 
 async function listArtifacts(dir) {
