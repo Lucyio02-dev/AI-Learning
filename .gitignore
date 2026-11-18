@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 server/data/
 .venv/
+test-results/
+playwright-report/
+e2e/.tmp-data/

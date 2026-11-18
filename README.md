@@ -31,9 +31,10 @@ npm run static        # http://127.0.0.1:4173，规则实验与本地数据可�
 ## 检查与测试
 
 ```sh
-npm run check        # 全部 JS 语法检查（前端 31 模块 + 后端）
-npm test             # 自动化回归（迁移/引擎/API/隔离/冲突/缓存升级/发布模块完整性）
+npm run check        # 全部 JS 语法检查（前端模块 + 后端）
+npm test             # 核心/API 回归（迁移/保存语义/历史/证据/隔离/冲突/发布）
 npm run pycheck      # Python 实验脚本语法检查
+npm run e2e          # Playwright 静态、生产构建与完整模式路径；首次先运行 npm run e2e:install
 node scripts/link-check.mjs   # 课程引用链接可达性核对
 ```
 

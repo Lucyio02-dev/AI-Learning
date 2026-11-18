@@ -15,12 +15,17 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      # 依赖锁定：前端与后端零第三方 npm 依赖；Python 仅语法检查不装包
-      - name: Install python deps for syntax check
+      # 应用运行时零第三方 npm 依赖；Playwright 仅用于端到端回归。
+      - run: npm ci
+      - name: Install Python deps for syntax check
         run: python -m pip install numpy
       - run: npm run check
       - run: npm test
       - run: npm run pycheck
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser end-to-end regression
+        run: npm run e2e
       - name: Verify backend boots and serves health
         run: |
           node server/index.js &
