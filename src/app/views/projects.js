@@ -270,6 +270,10 @@ export function bind(root) {
   });
 }
 
+function rerender() {
+  import("../../../app.js").then(({ rerender: renderApp }) => renderApp());
+}
+
 export function projectArchiveMarkdown(project, data = {}, linkedRuns = [], missingIds = []) {
   const stages = project.stages.map((stage) => {
     const saved = data.stages?.[stage.id] || {};
